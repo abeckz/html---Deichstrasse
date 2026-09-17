@@ -42,6 +42,15 @@ function buildBasePolygon(rng, opts) {
 
     // Zusätzliche seitliche Verschiebung: dadurch zeigen die Kanten in
     // verschiedene Richtungen und das Vieleck wird wirklich unförmig.
+    const sideShift = rng.range(-0.35, 0.35) * radius;
+    corners.push(v3(
+      Math.cos(angle) * r + sideShift,
+      0,
+      Math.sin(angle) * r + rng.range(-0.35, 0.35) * radius,
+    ));
+  }
+  return sortByAngle(corners, centroid2D(corners));
+}
 
 /**
  * Baut einen Ring in einer bestimmten Höhe.
@@ -110,11 +119,6 @@ function buildRing(base, center, level, rng, opts, noiseFns) {
   return { points: pts, corners, y: level.y, index: level.index };
 }
 
-    const sideShift = rng.range(-0.35, 0.35) * radius;
-
-    corners.push(v3(
-      Math.cos(angle) * r + sideShift,
-      0,
 export function buildScene(seed = 20260917, options = {}) {
   const opts = {
     cornerCount: 12,
@@ -175,9 +179,3 @@ export function buildScene(seed = 20260917, options = {}) {
 }
 
 export { dist };
-
-      Math.sin(angle) * r + rng.range(-0.35, 0.35) * radius,
-    ));
-  }
-  return sortByAngle(corners, centroid2D(corners));
-}
