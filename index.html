@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dijkstra im Schlauch - kuerzester Weg nach oben</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="app">
+  <aside class="panel">
+    <h1>Dijkstra&nbsp;im&nbsp;Schlauch</h1>
+    <p class="intro">
+      Ein zufaelliges Grundpolygon in der x-z-Ebene traegt einen Schlauch aus
+      gestapelten, verformten Ringen. Der kuerzeste Weg von unten nach oben wird
+      Strich fuer Strich gesucht.
+    </p>
+
+    <section class="group">
+      <div class="row">
+        <button id="playPause" class="primary">Start</button>
+        <button id="reset">Neu suchen</button>
+        <button id="regenerate">Neue Szene</button>
+      </div>
+      <p class="hint">Leertaste = Start/Pause &middot; R = neue Szene &middot; Ziehen = drehen &middot; Rad = zoomen</p>
+    </section>
+
+    <section class="group">
+      <label class="field">
+        <span>Tempo (ms pro Knoten)</span>
+        <input id="speed" type="range" min="8" max="600" value="90" step="2" />
+        <output id="speedLabel">90 ms</output>
+      </label>
+
+      <label class="field">
+        <span>Schlauchhoehe (Ringe)</span>
+        <input id="density" type="range" min="3" max="12" value="7" step="1" />
+        <output id="densityLabel">7</output>
+      </label>
+
+      <label class="field">
+        <span>Seed</span>
+        <input id="seedInput" type="number" value="20260917" />
+      </label>
+
+      <label class="check">
+        <input id="showDist" type="checkbox" />
+        <span>Distanzwerte anzeigen</span>
+      </label>
+    </section>
+
+    <section class="group stats">
+      <div class="stat"><span>Knoten</span><b id="statNodes">-</b></div>
+      <div class="stat"><span>Striche</span><b id="statEdges">-</b></div>
+      <div class="stat"><span>abgearbeitet</span><b id="statSettled">-</b></div>
+      <div class="stat"><span>erreicht</span><b id="statReached">-</b></div>
+      <div class="stat"><span>Distanz zum Ziel</span><b id="statDist">-</b></div>
+      <div class="stat"><span>Status</span><b id="statState">bereit</b></div>
+      <div class="progress"><div id="progress"></div></div>
+    </section>
+
+    <section class="group legend">
+      <div><i class="sw start"></i> Start (unten)</div>
+      <div><i class="sw target"></i> Ziel (oben)</div>
+      <div><i class="sw queued"></i> in der Warteschlange</div>
+      <div><i class="sw settled"></i> abgearbeitet</div>
+      <div><i class="sw tree"></i> vorlaeufig bester Weg</div>
+      <div><i class="sw path"></i> endgueltig kuerzester Weg</div>
+    </section>
+
+    <p id="summary" class="summary"></p>
+  </aside>
+
+  <main class="stage">
+    <canvas id="scene"></canvas>
+    <div id="tooltip" class="tooltip"></div>
+  </main>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
