@@ -71,7 +71,7 @@ export function buildGraph(scene) {
     for (let i = 0; i < perRing; i++) {
       const step = Math.max(1, Math.round(scene.options.ribEvery));
       if (i % step !== 0) continue;
-      // Zufaellige Luecken erzeugen Umwege (deterministisch gewuerfelt).
+      // Zufällige Lücken erzeugen Umwege (deterministisch gewürfelt).
       const gapNoise = Math.sin(i * 12.9898 + r * 78.233 + scene.seed * 0.001);
       if (gapNoise > 0.75) continue;
       const aId = getNode(lower.points[i], lower.index, false);
@@ -79,7 +79,7 @@ export function buildGraph(scene) {
       if (addEdge(aId, bId, 'rib')) built++;
     }
     // Sicherheitsnetz: jedes Ringpaar braucht mindestens eine Rippe,
-    // sonst waere der obere Teil des Schlauches unerreichbar.
+    // sonst wäre der obere Teil des Schlauches unerreichbar.
     if (built === 0) {
       const i = Math.abs(Math.round(Math.sin(r * 3.1 + scene.seed) * perRing)) % perRing;
       const aId = getNode(lower.points[i], lower.index, false);
@@ -103,7 +103,7 @@ export function pickEndpoints(graph, scene) {
   const bottom = graph.nodes.filter((n) => n.ring === graph.bottomRing);
   const top = graph.nodes.filter((n) => n.ring === graph.topRing);
 
-  // Start unten "vorne", Ziel oben moeglichst weit weg (vorne/hinten gemischt),
+  // Start unten "vorne", Ziel oben möglichst weit weg (vorne/hinten gemischt),
   // damit der Weg wirklich ein Umweg ist.
   const start = bottom.reduce((best, n) => (n.pos.z > (best?.pos.z ?? -Infinity) ? n : best), null);
   const target = top.reduce((best, n) => (n.pos.z < (best?.pos.z ?? Infinity) ? n : best), null);

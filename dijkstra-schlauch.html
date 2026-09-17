@@ -1,0 +1,1575 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dijkstra im Schlauch (Einzeldatei)</title>
+<style>
+:root {
+  --bg: #070a14;
+  --panel: #101528;
+  --panel-2: #161d33;
+  --line: #263055;
+  --text: #e8ecf8;
+  --muted: #9aa7c7;
+  --accent: #6ea8fe;
+  --start: #5ee1a8;
+  --target: #ff8fb1;
+  --path: #ffe066;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  height: 100vh;
+}
+
+/* --------------------------------- Panel --------------------------------- */
+
+.panel {
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  padding: 16px 16px 28px;
+  overflow-y: auto;
+}
+
+.panel h1 {
+  font-size: 17px;
+  margin: 4px 0 8px;
+  letter-spacing: 0.2px;
+}
+
+.intro, .hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+
+.hint { margin: 10px 0 0; }
+
+.group {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+button {
+  flex: 1 1 auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+button:hover { background: #1d2643; border-color: #3a4780; }
+
+button.primary {
+  background: linear-gradient(180deg, #2b5fd9, #1e46a8);
+  border-color: #3f6fe0;
+}
+
+button.primary:hover { background: linear-gradient(180deg, #3468e6, #2450b8); }
+
+/* -------------------------------- Controls ------------------------------- */
+
+.field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.field > span { grid-column: 1 / -1; }
+
+.field input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.field output {
+  font-family: ui-monospace, Consolas, monospace;
+  color: var(--text);
+  font-size: 12px;
+  min-width: 56px;
+  text-align: right;
+}
+
+.field input[type="number"] {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.check input { accent-color: var(--accent); }
+
+/* --------------------------------- Stats -------------------------------- */
+
+.stats { display: grid; gap: 6px; }
+
+.stat {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.stat b {
+  color: var(--text);
+  font-family: ui-monospace, Consolas, monospace;
+  font-weight: 600;
+}
+
+.progress {
+  height: 6px;
+  border-radius: 99px;
+  background: #1b2340;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.progress > div {
+  height: 100%;
+  width: 0%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--start), var(--accent), var(--target));
+  transition: width 0.12s linear;
+}
+
+/* -------------------------------- Legend -------------------------------- */
+
+.legend {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.legend i.sw {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.sw.start { background: var(--start); }
+.sw.target { background: var(--target); }
+.sw.queued { background: #78c8ff; }
+.sw.settled { background: #ffd166; }
+.sw.tree { background: #ff7a5c; }
+.sw.path { background: var(--path); box-shadow: 0 0 8px var(--path); }
+
+.summary {
+  font-size: 12px;
+  color: var(--path);
+  line-height: 1.5;
+  margin: 12px 0 0;
+  min-height: 16px;
+}
+
+/* --------------------------------- Stage -------------------------------- */
+
+.stage { position: relative; }
+
+#scene {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+#scene:active { cursor: grabbing; }
+
+.tooltip {
+  position: absolute;
+  display: none;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: rgba(10, 14, 28, 0.94);
+  border: 1px solid var(--line);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+@media (max-width: 820px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .panel { max-height: 45vh; border-right: none; border-bottom: 1px solid var(--line); }
+}
+
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="panel">
+    <h1>Dijkstra&nbsp;im&nbsp;Schlauch</h1>
+    <p class="intro">
+      Ein zufälliges Grundpolygon in der x-z-Ebene trägt einen Schlauch aus
+      gestapelten, verformten Ringen. Der kürzeste Weg von unten nach oben wird
+      Strich für Strich gesucht.
+    </p>
+
+    <section class="group">
+      <div class="row">
+        <button id="playPause" class="primary">Start</button>
+        <button id="reset">Neu suchen</button>
+        <button id="regenerate">Neue Szene</button>
+      </div>
+      <div class="row" style="margin-top: 8px;">
+        <button id="resetView">Blick zurücksetzen</button>
+      </div>
+      <p class="hint">Leertaste = Start/Pause &middot; R = neue Szene &middot; Ziehen = drehen &middot; Rad = zoomen</p>
+    </section>
+
+    <section class="group">
+      <label class="field">
+        <span>Tempo (ms pro Knoten)</span>
+        <input id="speed" type="range" min="8" max="600" value="90" step="2" />
+        <output id="speedLabel">90 ms</output>
+      </label>
+
+      <label class="field">
+        <span>Schlauchhöhe (Ringe)</span>
+        <input id="density" type="range" min="3" max="12" value="7" step="1" />
+        <output id="densityLabel">7</output>
+      </label>
+
+      <label class="field">
+        <span>Seed</span>
+        <input id="seedInput" type="number" value="20260917" />
+      </label>
+
+      <label class="check">
+        <input id="showDist" type="checkbox" />
+        <span>Distanzwerte anzeigen</span>
+      </label>
+
+      <label class="check">
+        <input id="showHidden" type="checkbox" checked />
+        <span>Rückseite schwach andeuten</span>
+      </label>
+
+      <label class="check">
+        <input id="showNodes" type="checkbox" checked />
+        <span>Knotenpunkte anzeigen</span>
+      </label>
+    </section>
+
+    <section class="group stats">
+      <div class="stat"><span>Knoten</span><b id="statNodes">-</b></div>
+      <div class="stat"><span>Striche</span><b id="statEdges">-</b></div>
+      <div class="stat"><span>abgearbeitet</span><b id="statSettled">-</b></div>
+      <div class="stat"><span>erreicht</span><b id="statReached">-</b></div>
+      <div class="stat"><span>Distanz zum Ziel</span><b id="statDist">-</b></div>
+      <div class="stat"><span>Status</span><b id="statState">bereit</b></div>
+      <div class="progress"><div id="progress"></div></div>
+    </section>
+
+    <section class="group legend">
+      <div><i class="sw start"></i> Start (unten)</div>
+      <div><i class="sw target"></i> Ziel (oben)</div>
+      <div><i class="sw queued"></i> in der Warteschlange</div>
+      <div><i class="sw settled"></i> abgearbeitet</div>
+      <div><i class="sw tree"></i> vorläufig bester Weg</div>
+      <div><i class="sw path"></i> endgültig kürzester Weg</div>
+    </section>
+
+    <p id="summary" class="summary"></p>
+  </aside>
+
+  <main class="stage">
+    <canvas id="scene"></canvas>
+    <div id="tooltip" class="tooltip"></div>
+  </main>
+</div>
+
+<script>
+/* =======================================================================
+   Dijkstra im Schlauch - automatisch erzeugte Einzeldatei
+   Quelle: index.html, styles.css, js/*.js
+   Erzeugt von tools/build_single_file.ps1 - nicht direkt bearbeiten!
+   ======================================================================= */
+
+/* ---------------------------- rng.js ---------------------------- */
+/**
+ * Deterministischer Zufallsgenerator + einfaches Rauschen.
+ * Damit lässt sich jede Szene über einen Seed reproduzieren.
+ */
+
+/** Mulberry32 - kleiner, schneller, seedbarer PRNG. */
+function makeRng(seed) {
+  let a = (seed >>> 0) || 1;
+  const rng = function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  rng.range = (min, max) => min + rng() * (max - min);
+  rng.int = (min, max) => Math.floor(rng.range(min, max + 1));
+  rng.pick = (arr) => arr[Math.floor(rng() * arr.length) % arr.length];
+  return rng;
+}
+
+/** Erzeugt eine glatte 1D-Rauschfunktion aus ein paar Zufallswerten (Kosinus-Interpolation). */
+function makeNoise1D(rng, points = 12) {
+  const values = [];
+  for (let i = 0; i < points; i++) values.push(rng() * 2 - 1);
+  return (t) => {
+    const n = values.length;
+    const x = ((t % 1) + 1) % 1;
+    const f = x * n;
+    const i0 = Math.floor(f) % n;
+    const i1 = (i0 + 1) % n;
+    const frac = f - Math.floor(f);
+    const smooth = (1 - Math.cos(frac * Math.PI)) * 0.5;
+    return values[i0] * (1 - smooth) + values[i1] * smooth;
+  };
+}
+
+/* ---------------------------- geometry.js ---------------------------- */
+/**
+ * Kleine Vektor- und Geometriehelfer für die 3D-Szene.
+ * Koordinaten: x nach rechts, y nach oben, z in die Tiefe (Höhe des Schlauches = y).
+ * Die "Bodenebene" des Polygons ist also x-z.
+ */
+
+const v3 = (x = 0, y = 0, z = 0) => ({ x, y, z });
+
+const sub = (a, b) => v3(a.x - b.x, a.y - b.y, a.z - b.z);
+const add = (a, b) => v3(a.x + b.x, a.y + b.y, a.z + b.z);
+const scale = (a, s) => v3(a.x * s, a.y * s, a.z * s);
+const len = (a) => Math.hypot(a.x, a.y, a.z);
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+
+function lerp3(a, b, t) {
+  return v3(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
+}
+
+/** Rotation um die Y-Achse (Drehen des Schlauches) und anschliessend um X (Kippen). */
+function rotate(p, yaw, pitch) {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const x1 = p.x * cy - p.z * sy;
+  const z1 = p.x * sy + p.z * cy;
+  const cx = Math.cos(pitch), sx = Math.sin(pitch);
+  const y1 = p.y * cx - z1 * sx;
+  const z2 = p.y * sx + z1 * cx;
+  return v3(x1, y1, z2);
+}
+
+/**
+ * Perspektivprojektion auf die CanvasFläche.
+ *
+ * Die Kamera schwebt bei (0, cameraHeight, distance) und schaut auf die
+ * GrundFläche hinab. `pitch` kippt zusätzlich die Ansicht. Damit ist der
+ * Blick von oben physikalisch eindeutig und nicht nur eine Verzerrung.
+ *
+ * In Canvas zeigt y nach unten, daher wird der gedrehte y-Wert abgezogen.
+ */
+function project(p, view, w, h) {
+  const camY = view.cameraHeight || 0;
+  const r = rotate(v3(p.x, p.y - camY, p.z), view.yaw, view.pitch);
+
+  const zc = Math.max(r.z + view.distance, 0.2);
+  const k = (view.fov * (Math.min(w, h) / 2)) / zc;
+  return {
+    x: w / 2 + r.x * k,
+    y: h / 2 - r.y * k + view.offsetY,
+    depth: zc,
+    scale: k,
+  };
+}
+
+/** Punkt-in-Polygon (Ray-Casting) in der x-z-Ebene. */
+function pointInPolygon2D(px, pz, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, zi = poly[i].z;
+    const xj = poly[j].x, zj = poly[j].z;
+    const intersect = zi > pz !== zj > pz && px < ((xj - xi) * (pz - zi)) / (zj - zi || 1e-9) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/** Flächenschwerpunkt eines Polygons in der x-z-Ebene. */
+function centroid2D(poly) {
+  let a = 0, cx = 0, cz = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const cross = poly[j].x * poly[i].z - poly[i].x * poly[j].z;
+    a += cross;
+    cx += (poly[j].x + poly[i].x) * cross;
+    cz += (poly[j].z + poly[i].z) * cross;
+  }
+  a *= 0.5;
+  if (Math.abs(a) < 1e-9) return { x: 0, z: 0 };
+  return { x: cx / (6 * a), z: cz / (6 * a) };
+}
+
+/** Sortiert Punkte nach Winkel um einen Mittelpunkt (für unregelmäßige Ringe). */
+function sortByAngle(points, center) {
+  return points
+    .map((p) => ({ p, a: Math.atan2(p.z - center.z, p.x - center.x) }))
+    .sort((u, w) => u.a - w.a)
+    .map((e) => e.p);
+}
+
+/* ---------------------------- generator.js ---------------------------- */
+/**
+ * Erzeugt die Szene:
+ *  1. ein unregelmäßiges Polygon in der x-z-Ebene (random Ecken),
+ *  2. darüber gestapelte, verformte Kopien ("Ringe"), die zusammen einen
+ *     Schlauch bilden, dessen Waende aus einzelnen Strichen bestehen.
+ *
+ * Wichtig: Alle Rippen (vertikale Striche) und alle Ringstuecke werden
+ * gleich behandelt - der Dijkstra läuft später über genau diese Striche.
+ */
+
+
+/**
+ * Ein Ring ist eine geschlossene Linie aus Segmenten. Damit man den Weg
+ * "nach oben" wirklich suchen muss, ist jeder Ring in mehrere Striche
+ * unterteilt, und die Ringe sind untereinander nur über die Rippen verbunden.
+ */
+/**
+ * Erzeugt das Grundpolygon in der x-z-Ebene.
+ *
+ * Für eine wirklich unförmige Silhouette sorgen drei Dinge zusammen:
+ *  1. ungleiche Winkel zwischen den Ecken (nicht gleichmäßig verteilt),
+ *  2. stark schwankende Radien (Ausbuchtungen und Einbuchtungen),
+ *  3. zusätzliche "Zacken": einzelne Ecken werden weit nach außen gezogen.
+ * Dadurch entstehen konkave Stellen mit echten Abzweigungen.
+ */
+function buildBasePolygon(rng, opts) {
+  const { cornerCount, radius, jitter, noise } = opts;
+  const corners = [];
+
+  for (let i = 0; i < cornerCount; i++) {
+    const u = i / cornerCount;
+
+    // 1. ungleiche Winkel: jeder Schritt schwankt deutlich
+    const step = (Math.PI * 2) / cornerCount;
+    const angle = i * step + rng.range(-step * 0.35, step * 0.35);
+
+    // 2. Radien mit großer Spannweite: Ausbuchtungen und Einbuchtungen
+    const wobble = 1 + noise(u) * 0.55;
+    const local = 1 + rng.range(-jitter * 2.2, jitter * 2.2);
+
+    // 3. Zacken: etwa jede vierte Ecke wird deutlich nach außen gezogen
+    const spike = rng() < 0.28 ? rng.range(1.25, 1.7) : 1;
+    // und etwa jede fünfte Ecke nach innen gedrückt
+    const dent = rng() < 0.2 ? rng.range(0.55, 0.78) : 1;
+
+    const r = radius * wobble * local * spike * dent;
+    corners.push(v3(Math.cos(angle) * r, 0, Math.sin(angle) * r));
+  }
+  return sortByAngle(corners, centroid2D(corners));
+}
+
+/**
+ * Baut einen Ring in einer bestimmten Höhe aus einer Basisform auf.
+ * Der Ring wird zusätzlich verdreht, geschrumpft/gestreckt und gedaempft
+ * verformt, damit der Schlauch organisch wirkt.
+ *
+ * Wichtig: die Seiten zwischen den Ecken sind keine geraden Linien. Jeder
+ * Zwischenpunkt wird zur Seite hin verschoben (nach aussen oder innen), damit
+ * die Silhouette unregelmäßig "eingekerbt" wirkt. Trotzdem bleibt jedes
+ * Teilstueck eine eigene, klar sichtbare Strecke.
+ */
+function buildRing(base, center, level, rng, opts, noiseFns) {
+  const t = level.height;
+  const twist = level.twist;
+  const shrink = level.shrink;
+  const bumpAmp = level.bumpAmp;
+
+  const corners = base.map((c, i) => {
+    const rel = { x: c.x - center.x, z: c.z - center.z };
+    const cs = Math.cos(twist), sn = Math.sin(twist);
+    const rx = rel.x * cs - rel.z * sn;
+    const rz = rel.x * sn + rel.z * cs;
+    const u = i / base.length;
+    const bump = 1 + noiseFns.a(u + t) * bumpAmp + noiseFns.b(u * 2 - t) * bumpAmp * 0.5;
+    const r = shrink * bump;
+    return v3(center.x + rx * r, level.y, center.z + rz * r);
+  });
+
+  // Die Striche eines Ringes: jede Seite wird in `cornerSegments` Teilstuecke
+  // zerlegt, deren Zwischenpunkte seitlich ausgelenkt werden.
+  const pts = [];
+  const segs = opts.cornerSegments;
+  const dent = opts.segmentDent;
+
+  for (let i = 0; i < corners.length; i++) {
+    const a = corners[i];
+    const b = corners[(i + 1) % corners.length];
+    for (let s = 0; s < segs; s++) {
+      const u = (i + s / segs) / corners.length;
+      const base = lerp3(a, b, s / segs);
+      if (s === 0) {
+        // Die echte Ecke bleibt exakt erhalten - sonst verschwindet die Form.
+        pts.push(base);
+        continue;
+      }
+      // Verschiebung senkrecht zur Seite, gesteuert durch zwei Rauschwerte,
+      // damit benachbarte Ringe unterschiedlich verformt sind. Ein zusätzlicher
+      // harter Anteil erzeugt einzelne scharfe Knicke statt nur weicher Wellen.
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const len = Math.hypot(dx, dz) || 1;
+      const nx = -dz / len;
+      const nz = dx / len;
+
+      const soft = noiseFns.a(u * 2.3 + t * 1.7) * 0.8 + noiseFns.b(u * 4.1 - t * 1.1) * 0.4;
+      // Der harte Anteil springt pro Ecke und Ringstufe zwischen zwei Werten.
+      const hard = Math.sin((i * 2.7 + level.index * 1.9) * 3.1) > 0.35 ? 0.85 : -0.5;
+      const amount = (soft + hard * 0.6) * dent;
+
+      pts.push(v3(base.x + nx * amount, base.y, base.z + nz * amount));
+    }
+  }
+  return { points: pts, corners, y: level.y, index: level.index };
+}
+
+function buildScene(seed = 20260917, options = {}) {
+  const opts = {
+    cornerCount: 11,
+    cornerSegments: 3, // Unterteilung pro Polygonecke -> Striche pro Ring
+    segmentDent: 0.34, // seitliche Auslenkung der Zwischenpunkte (unregelmäßige Seiten)
+    rings: 7,
+    height: 3.2,
+    radius: 1.5,
+    jitter: 0.2,
+    ribEvery: 1, // jede n-te Rippe wird tatsächlich gebaut (Lücken erzeugen Umwege)
+    ...options,
+  };
+
+  const rng = makeRng(seed);
+  const noiseA = makeNoise1D(rng, 16);
+  const noiseB = makeNoise1D(rng, 24);
+  const noiseFns = { a: noiseA, b: noiseB };
+
+  const basePolygon = buildBasePolygon(rng, {
+    cornerCount: opts.cornerCount,
+    radius: opts.radius,
+    jitter: opts.jitter,
+    noise: noiseA,
+  });
+  const center = centroid2D(basePolygon);
+
+  // Höhenstufen des Schlauches mit leicht Zufälliger Verteilung.
+  const levels = [];
+  for (let i = 0; i < opts.rings; i++) {
+    const t = i / (opts.rings - 1);
+    levels.push({
+      index: i,
+      height: t,
+      y: t * opts.height,
+      twist: t * rng.range(0.6, 1.6) + rng.range(-0.05, 0.05),
+      shrink: 1 - t * rng.range(0.05, 0.3),
+      bumpAmp: rng.range(0.06, 0.2),
+    });
+  }
+
+  const rings = levels.map((lvl) => buildRing(basePolygon, center, lvl, rng, opts, noiseFns));
+
+  return {
+    seed,
+    options: opts,
+    rng,
+    basePolygon,
+    center,
+    rings,
+    totalHeight: opts.height,
+  };
+}
+
+/* ---------------------------- graph.js ---------------------------- */
+/**
+ * Baut aus der Szene einen Graphen: Knoten sind die Punkte auf den Ringen,
+ * Kanten sind genau die "Striche" (Ringsegmente und vertikale Rippen).
+ * Neue Striche werden eingefuegt: pro Stufe eine begrenzte Anzahl,
+ * damit man das Wachsen schoen beobachten kann.
+ */
+
+function key(x, y, z) {
+  return `${Math.round(x * 1000)}|${Math.round(y * 1000)}|${Math.round(z * 1000)}`;
+}
+
+function buildGraph(scene) {
+  const nodes = [];
+  const index = new Map();
+
+  const getNode = (p, ringIndex, isCorner) => {
+    const k = key(p.x, p.y, p.z);
+    let id = index.get(k);
+    if (id === undefined) {
+      id = nodes.length;
+      index.set(k, id);
+      nodes.push({ id, pos: { ...p }, ring: ringIndex, isCorner, edges: [], visible: false });
+    }
+    return id;
+  };
+
+  const edges = [];
+  const addEdge = (aId, bId, kind) => {
+    if (aId === bId) return null;
+    const a = nodes[aId], b = nodes[bId];
+    const length = dist(a.pos, b.pos);
+    if (length < 1e-6) return null;
+    const edge = {
+      id: edges.length,
+      a: aId,
+      b: bId,
+      length,
+      kind, // 'ring' | 'rib'
+      level: Math.max(a.ring, b.ring),
+      state: 'idle', // idle | tree | rejected | path
+      usedInPath: false,
+    };
+    edges.push(edge);
+    a.edges.push(edge);
+    b.edges.push(edge);
+    return edge;
+  };
+
+  const rings = scene.rings;
+
+  // 1) Ringstriche: jeder Ring besteht aus lauter einzelnen Strichen.
+  for (const ring of rings) {
+    const n = ring.points.length;
+    for (let i = 0; i < n; i++) {
+      const p = ring.points[i];
+      const q = ring.points[(i + 1) % n];
+      const a = getNode(p, ring.index, false);
+      const b = getNode(q, ring.index, false);
+      addEdge(a, b, 'ring');
+    }
+  }
+
+  // 2) Rippen: vertikale Striche verbinden die Ringe - aber nur an einigen
+  // Stellen, damit es echte Sackgassen und Umwege gibt.
+  const perRing = rings[0].points.length;
+  for (let r = 0; r < rings.length - 1; r++) {
+    const lower = rings[r];
+    const upper = rings[r + 1];
+    let built = 0;
+    for (let i = 0; i < perRing; i++) {
+      const step = Math.max(1, Math.round(scene.options.ribEvery));
+      if (i % step !== 0) continue;
+      // Zufällige Lücken erzeugen Umwege (deterministisch gewürfelt).
+      const gapNoise = Math.sin(i * 12.9898 + r * 78.233 + scene.seed * 0.001);
+      if (gapNoise > 0.75) continue;
+      const aId = getNode(lower.points[i], lower.index, false);
+      const bId = getNode(upper.points[i], upper.index, false);
+      if (addEdge(aId, bId, 'rib')) built++;
+    }
+    // Sicherheitsnetz: jedes Ringpaar braucht mindestens eine Rippe,
+    // sonst wäre der obere Teil des Schlauches unerreichbar.
+    if (built === 0) {
+      const i = Math.abs(Math.round(Math.sin(r * 3.1 + scene.seed) * perRing)) % perRing;
+      const aId = getNode(lower.points[i], lower.index, false);
+      const bId = getNode(upper.points[i], upper.index, false);
+      addEdge(aId, bId, 'rib');
+    }
+  }
+
+  return {
+    nodes,
+    edges,
+    ringCount: rings.length,
+    perRing,
+    bottomRing: 0,
+    topRing: rings.length - 1,
+  };
+}
+
+/** Start- und Zielknoten: ein Knoten im untersten Ring und einer im obersten. */
+function pickEndpoints(graph, scene) {
+  const bottom = graph.nodes.filter((n) => n.ring === graph.bottomRing);
+  const top = graph.nodes.filter((n) => n.ring === graph.topRing);
+
+  // Start unten "vorne", Ziel oben möglichst weit weg (vorne/hinten gemischt),
+  // damit der Weg wirklich ein Umweg ist.
+  const start = bottom.reduce((best, n) => (n.pos.z > (best?.pos.z ?? -Infinity) ? n : best), null);
+  const target = top.reduce((best, n) => (n.pos.z < (best?.pos.z ?? Infinity) ? n : best), null);
+
+  return { startId: start.id, targetId: target.id };
+}
+
+/* ---------------------------- dijkstra.js ---------------------------- */
+/**
+ * Dijkstra als Generator: nach jedem Schritt (bzw. nach n Relaxierungen)
+ * wird pausiert und der aktuelle Zustand nach aussen sichtbar.
+ */
+
+/** Sehr einfache Binaerheap-basierte Priority Queue (Min-Heap). */
+class MinHeap {
+  constructor() {
+    this.items = [];
+  }
+  get size() {
+    return this.items.length;
+  }
+  push(node, dist) {
+    const item = { node, dist };
+    this.items.push(item);
+    let i = this.items.length - 1;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (this.items[parent].dist <= this.items[i].dist) break;
+      [this.items[parent], this.items[i]] = [this.items[i], this.items[parent]];
+      i = parent;
+    }
+    return item;
+  }
+  pop() {
+    const top = this.items[0];
+    const last = this.items.pop();
+    if (this.items.length > 0) {
+      this.items[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1;
+        const r = l + 1;
+        let smallest = i;
+        if (l < this.items.length && this.items[l].dist < this.items[smallest].dist) smallest = l;
+        if (r < this.items.length && this.items[r].dist < this.items[smallest].dist) smallest = r;
+        if (smallest === i) break;
+        [this.items[smallest], this.items[i]] = [this.items[i], this.items[smallest]];
+        i = smallest;
+      }
+    }
+    return top;
+  }
+}
+
+/**
+ * Legt die Dijkstra-Zustaende auf dem Graphen an.
+ * Zustand pro Knoten: 'idle' | 'queued' | 'settled'
+ */
+function initDijkstra(graph, startId) {
+  for (const n of graph.nodes) {
+    n.dist = Infinity;
+    n.prevEdge = null;
+    n.state = 'idle';
+    n.relaxCount = 0;
+  }
+  graph.nodes[startId].dist = 0;
+  graph.nodes[startId].state = 'queued';
+
+  const queue = new MinHeap();
+  queue.push(startId, 0);
+
+  return {
+    graph,
+    startId,
+    queue,
+    settledCount: 0,
+    relaxations: 0,
+    finished: false,
+    justSettled: null,
+    justRelaxed: [],
+  };
+}
+
+/**
+ * Führt bis zu `steps` Relaxierungen durch und gibt zurück, ob es weitergeht.
+ * Jeder "Schritt" ist das Abarbeiten genau eines Knotens aus der Queue,
+ * wobei alle Nachbarn dieses Knotens relaxiert werden (sichtbar als Aufleuchten).
+ */
+function dijkstraStep(state, steps = 1) {
+  const { graph } = state;
+  let done = 0;
+  while (done < steps) {
+    state.justRelaxed = [];
+    if (state.queue.size === 0) {
+      state.finished = true;
+      state.justSettled = null;
+      return false;
+    }
+    const top = state.queue.pop();
+    const node = graph.nodes[top.node];
+    // Veralteter Eintrag: Knoten wurde schon abgearbeitet.
+    if (node.state === 'settled') continue;
+    if (top.dist > node.dist) continue;
+
+    node.state = 'settled';
+    state.settledCount++;
+    state.justSettled = node.id;
+    done++;
+
+    for (const edge of node.edges) {
+      const otherId = edge.a === node.id ? edge.b : edge.a;
+      const other = graph.nodes[otherId];
+      if (other.state === 'settled') continue;
+      const candidate = node.dist + edge.length;
+      state.relaxations++;
+      if (candidate < other.dist) {
+        other.dist = candidate;
+        other.prevEdge = edge;
+        other.state = 'queued';
+        edge.state = 'tree';
+        edge.usedInPath = false;
+        state.queue.push(otherId, candidate);
+        state.justRelaxed.push({ nodeId: otherId, edge });
+      } else if (!edge.usedInPath) {
+        // Nur Kanten, die nicht schon zum vorlaeufigen Weg gehoeren, werden
+        // als verworfen markiert - sonst flackert die Anzeige.
+        edge.state = 'rejected';
+      }
+    }
+  }
+  return !state.finished;
+}
+
+/** Rekonstruiert den kürzesten Weg von start zum Ziel als Liste von Knoten-Ids + Kanten. */
+function shortestPath(state, targetId) {
+  const { graph } = state;
+  const target = graph.nodes[targetId];
+  if (!Number.isFinite(target.dist)) return null;
+  const nodeIds = [targetId];
+  const edges = [];
+  let cur = target;
+  while (cur.prevEdge) {
+    edges.push(cur.prevEdge);
+    const prevId = cur.prevEdge.a === cur.id ? cur.prevEdge.b : cur.prevEdge.a;
+    nodeIds.push(prevId);
+    cur = graph.nodes[prevId];
+    if (cur.id === state.startId) break;
+  }
+  nodeIds.reverse();
+  edges.reverse();
+  return { nodeIds, edges, length: target.dist };
+}
+
+/* ---------------------------- renderer.js ---------------------------- */
+/**
+ * Zeichnet die Szene auf ein 2D-Canvas, projiziert aus 3D.
+ * Keine Bibliotheken, damit die Datei einfach im Browser läuft.
+ */
+
+/** Farbskala von "sehr kurz" (gelb) nach "lang/unerreicht" (gedaempftes Blau). */
+function heatColor(t) {
+  const stops = [
+    [0.0, [255, 231, 130]],
+    [0.25, [255, 170, 70]],
+    [0.5, [250, 105, 105]],
+    [0.75, [140, 90, 220]],
+    [1.0, [70, 90, 160]],
+  ];
+  let a = stops[0], b = stops[stops.length - 1];
+  for (let i = 0; i < stops.length - 1; i++) {
+    if (t >= stops[i][0] && t <= stops[i + 1][0]) {
+      a = stops[i];
+      b = stops[i + 1];
+      break;
+    }
+  }
+  const span = b[0] - a[0] || 1;
+  const f = (t - a[0]) / span;
+  const c = [0, 0, 0];
+  for (let i = 0; i < 3; i++) c[i] = Math.round(a[1][i] + (b[1][i] - a[1][i]) * f);
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+
+class Renderer {
+  constructor(canvas, scene, graph, dpi = window.devicePixelRatio || 1) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.scene = scene;
+    this.graph = graph;
+    this.dpi = dpi;
+    // Fester Startblick: Die Kamera schwebt auf Höhe 3.4 über der Szene und
+    // blickt schräg auf die Grundfläche hinab. Beide Werte sind nötig:
+    // cameraHeight hebt die Kamera an, pitch (positiv) kippt die Ansicht so,
+    // dass der Boden als Fläche sichtbar wird. Geprüft mit tools/check_view.ps1.
+    this.homeView = {
+      yaw: -0.6,
+      pitch: 0.55,
+      cameraHeight: 3.4,
+      distance: 9.0,
+      fov: 1.35,
+      offsetY: 30,
+    };
+    this.view = { ...this.homeView };
+    this.hoverEdgeId = null;
+    this.showDistances = false;
+    // showHidden: verborgene Rückseiten-Striche schwach andeuten (3D-Eindruck).
+    // showNodes: 'on' = kleine Verbindungspunkte, 'off' = nur Linien.
+    this.showHidden = true;
+    this.showNodes = 'on';
+    this.maxDist = Infinity;
+    this.projected = [];
+    this.resize();
+  }
+
+  resize() {
+    const rect = this.canvas.getBoundingClientRect();
+    const w = Math.max(320, rect.width);
+    const h = Math.max(240, rect.height);
+    this.canvas.width = Math.floor(w * this.dpi);
+    this.canvas.height = Math.floor(h * this.dpi);
+    this.width = w;
+    this.height = h;
+    this.ctx.setTransform(this.dpi, 0, 0, this.dpi, 0, 0);
+  }
+
+  rotateBy(dx, dy) {
+    this.view.yaw += dx * 0.006;
+    this.view.pitch = Math.max(-1.2, Math.min(1.2, this.view.pitch + dy * 0.006));
+  }
+
+  /** Setzt den Blick auf die feste Startansicht zurück (schräg von oben). */
+  resetView() {
+    this.view = { ...this.homeView };
+  }
+
+  zoomBy(factor) {
+    this.view.distance = Math.max(2.5, Math.min(20, this.view.distance * factor));
+  }
+
+  /** Projektion für alle Knoten einmal pro Frame berechnen (Performance). */
+  computeScreenNodes() {
+    const view = this.view;
+    const w = this.width, h = this.height;
+    this.projected = this.graph.nodes.map((n) => project(n.pos, view, w, h));
+  }
+
+  edgeColor(edge) {
+    if (edge.usedInPath) return '#ffe066';
+    if (edge.state === 'tree') {
+      const max = Number.isFinite(this.maxDist) && this.maxDist > 0 ? this.maxDist : 1;
+      const d = Math.max(this.graph.nodes[edge.a].dist, this.graph.nodes[edge.b].dist);
+      return heatColor(Math.min(1, (Number.isFinite(d) ? d : max) / max));
+    }
+    if (edge.state === 'rejected') return 'rgba(150, 160, 190, 0.25)';
+    if (edge.state === 'active') return '#ffffff';
+    return 'rgba(120, 140, 190, 0.42)';
+  }
+
+  /** Zeichnet die komplette Szene. */
+  draw(state, opts = {}) {
+    const ctx = this.ctx;
+    const { width: w, height: h } = this;
+
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, '#0b1020');
+    grad.addColorStop(1, '#141a2e');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    this.computeScreenNodes();
+    this.drawFloor();
+
+    const drawList = this.graph.edges
+      .filter((e) => !opts.onlyPath || e.usedInPath)
+      .filter((e) => this.isEdgeVisible(e))
+      .map((e) => {
+        const pa = this.projected[e.a], pb = this.projected[e.b];
+        // Ein Streckenzug liegt "hinten", wenn sein Mittelpunkt hinter dem
+        // Zentrum des Schlauches liegt. Solche Striche werden gedaempft,
+        // damit man die Form als Koerper und nicht als Knaeuel sieht.
+        const depth = (pa.depth + pb.depth) * 0.5;
+        const behind = this.isBehindCenter(e);
+        return { e, pa, pb, depth, behind };
+      })
+      .sort((u, v) => v.depth - u.depth);
+
+    // Erst alle hinteren Striche gedaempft, dann die vorderen kraeftig.
+    for (const d of drawList) {
+      if (d.behind) this.drawEdge(d, state, true);
+    }
+    for (const d of drawList) {
+      if (!d.behind) this.drawEdge(d, state, false);
+    }
+
+    this.drawNodes(state, opts);
+    if (this.showDistances) this.drawDistanceLabels();
+  }
+
+  /**
+   * Prueft, ob ein Strich auf der abgewandten Seite des Schlauches liegt.
+   * Dazu wird die Höhe des Strichs betrachtet: der Mittelpunkt des Ringes
+   * in dieser Höhe liegt näher an der Kamera als der Strich selbst.
+   */
+  isBehindCenter(edge) {
+    if (!this.showHidden) return false;
+    const a = this.projected[edge.a];
+    const b = this.projected[edge.b];
+    if (!a || !b) return false;
+    const mid = { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5, depth: (a.depth + b.depth) * 0.5 };
+    const center = this.projectCenterAt(mid.y, edge.level);
+    return center !== null && center.depth < mid.depth;
+  }
+
+  /** Projiziert den Mittelpunkt der Schlauchachse auf gleicher Höhe. */
+  projectCenterAt(screenY, level) {
+    if (!this.scene || !this.scene.center) return null;
+    const c = this.scene.center;
+    const rings = this.scene.rings || [];
+    const ring = rings[Math.min(rings.length - 1, Math.max(0, level || 0))];
+    const y = ring ? ring.y : 0;
+    return project({ x: c.x, y, z: c.z }, this.view, this.width, this.height);
+  }
+
+  /** Waehrend der Aufbauphase werden noch nicht erzeugte Ringe ausgeblendet. */
+  isEdgeVisible(edge) {
+    const a = this.graph.nodes[edge.a];
+    const b = this.graph.nodes[edge.b];
+    if (a.visible === false || b.visible === false) return false;
+    return true;
+  }
+
+  drawEdge(d, state, behind) {
+    const ctx = this.ctx;
+    const { e, pa, pb } = d;
+    const dim = e.state === 'idle' && !e.usedInPath;
+
+    // Feste, duenne Linienbreite: jede Strecke bleibt als klare Linie erkennbar.
+    const width = e.usedInPath ? 3.2 : (e.state === 'tree' ? 2.2 : 1.4);
+
+    ctx.globalAlpha = behind ? 0.16 : (dim ? 0.5 : 1);
+    ctx.strokeStyle = this.edgeColor(e);
+    ctx.lineWidth = width;
+    // Scharfe Enden statt runder Kappen, sonst verschmieren kurze Striche.
+    ctx.lineCap = 'butt';
+
+    if (!behind && e.usedInPath) {
+      ctx.shadowColor = 'rgba(255, 224, 102, 0.8)';
+      ctx.shadowBlur = 10;
+    } else if (!behind && state && state.justRelaxed && state.justRelaxed.some((r) => r.edge === e)) {
+      ctx.shadowColor = 'rgba(120, 220, 255, 0.8)';
+      ctx.shadowBlur = 8;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+
+    if (e.id === this.hoverEdgeId) {
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+  }
+
+  drawNodes(state, opts) {
+    if (this.showNodes === false) return;
+
+    const ctx = this.ctx;
+    const order = this.graph.nodes
+      .map((n, i) => ({ n, p: this.projected[i] }))
+      .sort((u, v) => v.p.depth - u.p.depth);
+
+    // Sehr kleiner Grundradius: die Linien bleiben die Hauptdarsteller.
+    const baseR = 1.5;
+
+    for (const { n, p } of order) {
+      if (opts.onlyPath && !n.onPath) continue;
+      if (n.visible === false) continue;
+
+      let color = null;
+      let radius = baseR;
+
+      if (n.state === 'settled') {
+        color = '#ffd166';
+        radius = baseR * 1.5;
+      } else if (n.state === 'queued') {
+        color = 'rgba(120, 200, 255, 0.95)';
+        radius = baseR * 1.3;
+      }
+      if (state && n.id === state.startId) {
+        color = '#5ee1a8';
+        radius = baseR * 2.6;
+      } else if (state && n.id === state.targetId) {
+        color = '#ff8fb1';
+        radius = baseR * 2.6;
+      }
+      if (state && n.id === state.justSettledId) {
+        color = '#ffffff';
+        radius = baseR * 2.4;
+      }
+
+      // Unauffaellige Verbindungspunkte werden nur als winziger Punkt gesetzt,
+      // damit die Striche klar getrennt bleiben.
+      if (color === null) {
+        if (this.showNodes === 'off') continue;
+        color = 'rgba(200, 214, 245, 0.7)';
+      }
+
+      ctx.beginPath();
+      ctx.fillStyle = color;
+      ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  drawDistanceLabels() {
+    const ctx = this.ctx;
+    const max = Number.isFinite(this.maxDist) && this.maxDist > 0 ? this.maxDist : 1;
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    for (const n of this.graph.nodes) {
+      if (!Number.isFinite(n.dist)) continue;
+      if (n.visible === false) continue;
+      const p = this.projected[n.id];
+      ctx.fillStyle = heatColor(Math.min(1, n.dist / max));
+      ctx.fillText(n.dist.toFixed(2), p.x, p.y - 6);
+    }
+  }
+
+  /** Bodenraster für die Raumwirkung. */
+  drawFloor() {
+    const ctx = this.ctx;
+    const gridHalf = 3.2, step = 0.4;
+    ctx.strokeStyle = 'rgba(90, 110, 160, 0.16)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = -gridHalf; i <= gridHalf + 1e-6; i += step) {
+      const a = project({ x: i, y: 0, z: -gridHalf }, this.view, this.width, this.height);
+      const b = project({ x: i, y: 0, z: gridHalf }, this.view, this.width, this.height);
+      const c = project({ x: -gridHalf, y: 0, z: i }, this.view, this.width, this.height);
+      const d = project({ x: gridHalf, y: 0, z: i }, this.view, this.width, this.height);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.moveTo(c.x, c.y);
+      ctx.lineTo(d.x, d.y);
+    }
+    ctx.stroke();
+  }
+
+  /** Nächstgelegener Knoten zu einer Mausposition (Tooltip). */
+  pickNode(mx, my) {
+    if (this.projected.length === 0) return null;
+    let best = null;
+    for (let i = 0; i < this.projected.length; i++) {
+      const p = this.projected[i];
+      if (this.graph.nodes[i].visible === false) continue;
+      const d = Math.hypot(p.x - mx, p.y - my);
+      if (d < 14 && (!best || d < best.d)) best = { d, node: this.graph.nodes[i], screen: p };
+    }
+    return best;
+  }
+}
+
+/* ---------------------------- main.js ---------------------------- */
+/**
+ * Hauptsteuerung: Szene bauen, Graph bauen, Dijkstra animiert ablaufen lassen.
+ * Die Animation läuft über einen "Tick"-Zähler, damit man alles sehen kann.
+ */
+
+
+
+
+const ui = {
+  canvas: document.getElementById('scene'),
+  seed: document.getElementById('seedInput'),
+  speed: document.getElementById('speed'),
+  speedLabel: document.getElementById('speedLabel'),
+  density: document.getElementById('density'),
+  densityLabel: document.getElementById('densityLabel'),
+  regenerate: document.getElementById('regenerate'),
+  playPause: document.getElementById('playPause'),
+  reset: document.getElementById('reset'),
+  resetView: document.getElementById('resetView'),
+  showDist: document.getElementById('showDist'),
+  showHidden: document.getElementById('showHidden'),
+  showNodes: document.getElementById('showNodes'),
+  statNodes: document.getElementById('statNodes'),
+  statEdges: document.getElementById('statEdges'),
+  statSettled: document.getElementById('statSettled'),
+  statReached: document.getElementById('statReached'),
+  statDist: document.getElementById('statDist'),
+  statState: document.getElementById('statState'),
+  progress: document.getElementById('progress'),
+  tooltip: document.getElementById('tooltip'),
+  summary: document.getElementById('summary'),
+};
+
+const app = {
+  seed: Number(ui.seed.value) || 20260917,
+  scene: null,
+  graph: null,
+  state: null,
+  renderer: null,
+  running: false,
+  phase: 'growing', // growing | searching | tracing | done
+  growLevel: 0,
+  growTimer: 0,
+  traceIndex: 0,
+  traceTimer: 0,
+  lastTime: 0,
+  accTime: 0,
+};
+
+function buildWorld(seed) {
+  app.seed = seed;
+  app.scene = buildScene(seed, {
+    // Deutlich unförmigere Polygone: viele Ecken, gebrochene Seiten und
+    // kräftige Auslenkung erzeugen echte Abzweigungen.
+    cornerCount: 11,
+    cornerSegments: 3,
+    segmentDent: 0.34,
+    rings: Number(ui.density.value),
+    // Deutlich höher als breit, damit sich die Ringe nicht überlagern.
+    height: 5.0,
+    radius: 1.5,
+    jitter: 0.2,
+    ribEvery: 1,
+  });
+  app.graph = buildGraph(app.scene);
+  const { startId, targetId } = pickEndpoints(app.graph, app.scene);
+  app.startId = startId;
+  app.targetId = targetId;
+
+  if (!app.renderer) {
+    app.renderer = new Renderer(ui.canvas, app.scene, app.graph);
+  } else {
+    app.renderer.scene = app.scene;
+    app.renderer.graph = app.graph;
+  }
+  // Anzeigeoptionen aus den Bedienelementen übernehmen.
+  app.renderer.showDistances = ui.showDist.checked;
+  app.renderer.showHidden = ui.showHidden.checked;
+  app.renderer.showNodes = ui.showNodes.checked ? 'on' : 'off';
+  // Jede neue Szene beginnt mit demselben Blick: schräg von oben.
+  app.renderer.resetView();
+
+  resetSearch(true);
+  updateStaticStats();
+  ui.summary.textContent = '';
+}
+
+function resetSearch(autoStart = false) {
+  app.state = initDijkstra(app.graph, app.startId);
+  app.state.targetId = app.targetId;
+  app.state.justSettledId = null;
+  app.phase = 'growing';
+  app.running = autoStart;
+  app.growLevel = 0;
+  app.growTimer = 0;
+  app.traceIndex = 0;
+  app.accTime = 0;
+  app.renderer.hoverEdgeId = null;
+  for (const e of app.graph.edges) e.state = 'idle';
+  for (const n of app.graph.nodes) {
+    n.onPath = false;
+    n.visible = false;
+  }
+  app.renderer.maxDist = Infinity;
+  ui.playPause.textContent = autoStart ? 'Pause' : 'Start';
+  ui.progress.style.width = '0%';
+  updateStats();
+}
+
+function updateStaticStats() {
+  ui.statNodes.textContent = app.graph.nodes.length;
+  ui.statEdges.textContent = app.graph.edges.length;
+}
+
+function updateStats() {
+  const s = app.state;
+  if (!s) return;
+  let reached = 0;
+  for (const n of s.graph.nodes) if (Number.isFinite(n.dist)) reached++;
+  ui.statSettled.textContent = `${s.settledCount} / ${s.graph.nodes.length}`;
+  ui.statReached.textContent = reached;
+
+  const target = s.graph.nodes[app.targetId];
+  ui.statDist.textContent = Number.isFinite(target.dist) ? target.dist.toFixed(3) : '-';
+
+  const labels = {
+    growing: 'Schlauch waechst ...',
+    search: 'suche ...',
+    searching: 'suche ...',
+    tracing: 'Weg zurückverfolgen ...',
+    done: 'fertig',
+  };
+  ui.statState.textContent = labels[app.phase] || 'bereit';
+
+  const total = s.graph.nodes.length || 1;
+  ui.progress.style.width = `${Math.min(100, (s.settledCount / total) * 100).toFixed(1)}%`;
+}
+
+/* ------------------------------- Animation ------------------------------- */
+
+function loop(now) {
+  const dt = Math.min(0.05, (now - app.lastTime) / 1000 || 0);
+  app.lastTime = now;
+
+  if (app.running) {
+    if (app.phase === 'growing') {
+      advanceGrowth(dt);
+    } else {
+      const secondsPerStep = Number(ui.speed.value) / 1000; // Zeit pro Knoten
+      app.accTime += dt;
+      let guard = 0;
+      while (app.accTime >= secondsPerStep && guard++ < 40) {
+        app.accTime -= secondsPerStep;
+        advance();
+      }
+    }
+  }
+
+  if (app.phase === 'tracing') {
+    app.traceTimer -= dt;
+    if (app.traceTimer <= 0) advanceTrace();
+  }
+
+  app.renderer.draw(app.state, { onlyPath: false });
+  requestAnimationFrame(loop);
+}
+
+/**
+ * Aufbauphase: die Ringe des Schlauches werden von unten nach oben sichtbar,
+ * so dass man zuerst sieht, wie der Schlauch entsteht - und danach erst sucht
+ * der Algorithmus darin.
+ */
+function advanceGrowth(dt) {
+  const total = app.graph.ringCount || 1;
+  app.growTimer += dt;
+  const secondsPerRing = Math.max(0.06, (Number(ui.speed.value) / 1000) * 8);
+
+  while (app.growTimer >= secondsPerRing && app.growLevel < total) {
+    app.growTimer -= secondsPerRing;
+    app.growLevel++;
+    for (const n of app.graph.nodes) {
+      if (n.ring < app.growLevel) n.visible = true;
+    }
+  }
+
+  const pct = Math.min(100, (app.growLevel / total) * 100);
+  ui.progress.style.width = `${pct.toFixed(1)}%`;
+
+  if (app.growLevel >= total) {
+    app.phase = 'searching';
+    app.accTime = 0;
+    ui.progress.style.width = '0%';
+    ui.statState.textContent = 'suche ...';
+  }
+}
+
+/** Ein animierter Schritt des Dijkstra. */
+function advance() {
+  if (app.phase !== 'searching') return;
+
+  const more = dijkstraStep(app.state, 1);
+
+  // Farbnormierung laufend anpassen, damit die Farben im Rahmen bleiben.
+  let max = 0;
+  for (const n of app.graph.nodes) if (Number.isFinite(n.dist) && n.dist > max) max = n.dist;
+  app.renderer.maxDist = max || 1;
+
+  // Die Suche läuft vollständig durch, damit man alle Abzweigungen sieht.
+  // Erst wenn die Warteschlange leer ist, wird der gefundene Weg nachgezeichnet.
+  if (!more) startTracing();
+  updateStats();
+}
+
+/**
+ * Startet das langsame Nachzeichnen des kürzesten Weges.
+ * Wird erst aufgerufen, nachdem der Turm vollständig aufgebaut ist und die
+ * Suche alle Knoten abgearbeitet hat.
+ */
+function startTracing() {
+  const path = shortestPath(app.state, app.targetId);
+  if (!path) {
+    app.phase = 'done';
+    app.running = false;
+    ui.playPause.textContent = 'Start';
+    ui.summary.textContent = 'Ziel wurde nicht erreicht - die Rippen haben eine unpassierbare Lücke.';
+    return;
+  }
+  app.tracePath = path;
+  app.traceIndex = 0;
+  app.phase = 'tracing';
+  app.traceTimer = 0.35;
+
+  for (const n of app.graph.nodes) n.onPath = false;
+  for (const e of app.graph.edges) e.usedInPath = false;
+
+  ui.summary.textContent = `Kürzester Weg gefunden: ${path.edges.length} Striche, Länge ${path.length.toFixed(3)}`;
+  updateStats();
+}
+
+/** Setzt Schritt für Schritt den Weg frei (leuchtet langsam auf). */
+function advanceTrace() {
+  const path = app.tracePath;
+  if (app.traceIndex >= path.edges.length) {
+    app.phase = 'done';
+    app.running = false;
+    ui.playPause.textContent = 'Erneut abspielen';
+    ui.statState.textContent = 'fertig';
+    return;
+  }
+  const edge = path.edges[app.traceIndex];
+  const nodeId = path.nodeIds[app.traceIndex];
+  edge.usedInPath = true;
+  edge.state = 'path';
+  app.graph.nodes[nodeId].onPath = true;
+  if (app.traceIndex === path.edges.length - 1) {
+    app.graph.nodes[path.nodeIds[path.nodeIds.length - 1]].onPath = true;
+  }
+  app.traceIndex++;
+  app.traceTimer = (Number(ui.speed.value) / 1000) * 0.6;
+}
+
+/* ------------------------------ Interaktion ------------------------------ */
+
+function setRunning(value) {
+  // In der Aufbau- und Suchphase wird nur pausiert bzw. fortgesetzt.
+  if (app.phase !== 'done') {
+    app.running = value;
+    ui.playPause.textContent = value ? 'Pause' : 'Weiter';
+    return;
+  }
+  // Nach dem Ende startet der Knopf einen kompletten neuen Durchlauf.
+  if (value) {
+    resetSearch(true);
+  }
+}
+
+/** Der Knopf schaltet um: läuft etwas, wird pausiert - sonst gestartet. */
+function toggleRunning() {
+  if (app.phase === 'done') {
+    resetSearch(true);
+    return;
+  }
+  setRunning(!app.running);
+}
+
+ui.playPause.addEventListener('click', toggleRunning);
+ui.reset.addEventListener('click', () => resetSearch(true));
+ui.resetView.addEventListener('click', () => app.renderer.resetView());
+
+ui.regenerate.addEventListener('click', () => {
+  const seed = Math.floor(Math.random() * 1e9);
+  ui.seed.value = seed;
+  buildWorld(seed);
+});
+
+ui.seed.addEventListener('change', () => {
+  const seed = Number(ui.seed.value) || 1;
+  buildWorld(seed);
+});
+
+ui.speed.addEventListener('input', () => {
+  ui.speedLabel.textContent = `${ui.speed.value} ms`;
+});
+ui.density.addEventListener('input', () => {
+  ui.densityLabel.textContent = ui.density.value;
+  buildWorld(Number(ui.seed.value) || app.seed);
+});
+ui.showDist.addEventListener('change', () => {
+  app.renderer.showDistances = ui.showDist.checked;
+});
+ui.showHidden.addEventListener('change', () => {
+  app.renderer.showHidden = ui.showHidden.checked;
+});
+ui.showNodes.addEventListener('change', () => {
+  app.renderer.showNodes = ui.showNodes.checked ? 'on' : 'off';
+});
+
+// Maus: drehen, zoomen, Tooltip.
+let dragging = false, lastX = 0, lastY = 0;
+ui.canvas.addEventListener('pointerdown', (e) => {
+  dragging = true;
+  lastX = e.clientX;
+  lastY = e.clientY;
+  ui.canvas.setPointerCapture(e.pointerId);
+});
+ui.canvas.addEventListener('pointerup', (e) => {
+  dragging = false;
+  if (ui.canvas.hasPointerCapture(e.pointerId)) ui.canvas.releasePointerCapture(e.pointerId);
+});
+ui.canvas.addEventListener('pointermove', (e) => {
+  const rect = ui.canvas.getBoundingClientRect();
+  if (dragging) {
+    app.renderer.rotateBy(e.clientX - lastX, e.clientY - lastY);
+    lastX = e.clientX;
+    lastY = e.clientY;
+    return;
+  }
+  const hit = app.renderer.pickNode(e.clientX - rect.left, e.clientY - rect.top);
+  if (hit) {
+    const n = hit.node;
+    ui.tooltip.style.display = 'block';
+    ui.tooltip.style.left = `${e.clientX - rect.left + 14}px`;
+    ui.tooltip.style.top = `${e.clientY - rect.top + 14}px`;
+    const d = Number.isFinite(n.dist) ? n.dist.toFixed(3) : 'unerreicht';
+    ui.tooltip.textContent = `Knoten #${n.id} · Ring ${n.ring} · Höhe ${n.pos.y.toFixed(2)} · dist ${d}`;
+  } else {
+    ui.tooltip.style.display = 'none';
+  }
+});
+ui.canvas.addEventListener('pointerleave', () => {
+  ui.tooltip.style.display = 'none';
+});
+ui.canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  app.renderer.zoomBy(e.deltaY > 0 ? 1.08 : 0.92);
+}, { passive: false });
+
+window.addEventListener('resize', () => app.renderer.resize());
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    toggleRunning();
+  }
+  if (e.code === 'KeyR') {
+    ui.regenerate.click();
+  }
+});
+
+/* --------------------------------- Start --------------------------------- */
+
+buildWorld(Number(ui.seed.value) || app.seed);
+app.lastTime = performance.now();
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>

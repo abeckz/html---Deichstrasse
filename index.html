@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Dijkstra im Schlauch - kuerzester Weg nach oben</title>
+<title>Dijkstra im Schlauch - kürzester Weg nach oben</title>
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -11,9 +11,9 @@
   <aside class="panel">
     <h1>Dijkstra&nbsp;im&nbsp;Schlauch</h1>
     <p class="intro">
-      Ein zufaelliges Grundpolygon in der x-z-Ebene traegt einen Schlauch aus
-      gestapelten, verformten Ringen. Der kuerzeste Weg von unten nach oben wird
-      Strich fuer Strich gesucht.
+      Ein zufälliges Grundpolygon in der x-z-Ebene trägt einen Schlauch aus
+      gestapelten, verformten Ringen. Der kürzeste Weg von unten nach oben wird
+      Strich für Strich gesucht.
     </p>
 
     <section class="group">
@@ -21,6 +21,9 @@
         <button id="playPause" class="primary">Start</button>
         <button id="reset">Neu suchen</button>
         <button id="regenerate">Neue Szene</button>
+      </div>
+      <div class="row" style="margin-top: 8px;">
+        <button id="resetView">Blick zurücksetzen</button>
       </div>
       <p class="hint">Leertaste = Start/Pause &middot; R = neue Szene &middot; Ziehen = drehen &middot; Rad = zoomen</p>
     </section>
@@ -33,7 +36,7 @@
       </label>
 
       <label class="field">
-        <span>Schlauchhoehe (Ringe)</span>
+        <span>Schlauchhöhe (Ringe)</span>
         <input id="density" type="range" min="3" max="12" value="7" step="1" />
         <output id="densityLabel">7</output>
       </label>
@@ -46,6 +49,16 @@
       <label class="check">
         <input id="showDist" type="checkbox" />
         <span>Distanzwerte anzeigen</span>
+      </label>
+
+      <label class="check">
+        <input id="showHidden" type="checkbox" checked />
+        <span>Rückseite schwach andeuten</span>
+      </label>
+
+      <label class="check">
+        <input id="showNodes" type="checkbox" checked />
+        <span>Knotenpunkte anzeigen</span>
       </label>
     </section>
 
@@ -64,8 +77,8 @@
       <div><i class="sw target"></i> Ziel (oben)</div>
       <div><i class="sw queued"></i> in der Warteschlange</div>
       <div><i class="sw settled"></i> abgearbeitet</div>
-      <div><i class="sw tree"></i> vorlaeufig bester Weg</div>
-      <div><i class="sw path"></i> endgueltig kuerzester Weg</div>
+      <div><i class="sw tree"></i> vorläufig bester Weg</div>
+      <div><i class="sw path"></i> endgültig kürzester Weg</div>
     </section>
 
     <p id="summary" class="summary"></p>

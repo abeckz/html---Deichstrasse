@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 # Nur Teil 5 isoliert: Zufallsgraphen Dijkstra vs. Bellman-Ford
 $script:rngState = 1
 function Get-Rand {

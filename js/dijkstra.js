@@ -74,7 +74,7 @@ export function initDijkstra(graph, startId) {
 }
 
 /**
- * Fuehrt bis zu `steps` Relaxierungen durch und gibt zurueck, ob es weitergeht.
+ * Führt bis zu `steps` Relaxierungen durch und gibt zurück, ob es weitergeht.
  * Jeder "Schritt" ist das Abarbeiten genau eines Knotens aus der Queue,
  * wobei alle Nachbarn dieses Knotens relaxiert werden (sichtbar als Aufleuchten).
  */
@@ -123,7 +123,7 @@ export function dijkstraStep(state, steps = 1) {
   return !state.finished;
 }
 
-/** Rekonstruiert den kuerzesten Weg von start zum Ziel als Liste von Knoten-Ids + Kanten. */
+/** Rekonstruiert den kürzesten Weg von start zum Ziel als Liste von Knoten-Ids + Kanten. */
 export function shortestPath(state, targetId) {
   const { graph } = state;
   const target = graph.nodes[targetId];

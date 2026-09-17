@@ -1,6 +1,6 @@
 /**
  * Hauptsteuerung: Szene bauen, Graph bauen, Dijkstra animiert ablaufen lassen.
- * Die Animation laeuft ueber einen "Tick"-Zaehler, damit man alles sehen kann.
+ * Die Animation läuft über einen "Tick"-Zähler, damit man alles sehen kann.
  */
 import { buildScene } from './generator.js';
 import { buildGraph, pickEndpoints } from './graph.js';
@@ -17,7 +17,10 @@ const ui = {
   regenerate: document.getElementById('regenerate'),
   playPause: document.getElementById('playPause'),
   reset: document.getElementById('reset'),
+  resetView: document.getElementById('resetView'),
   showDist: document.getElementById('showDist'),
+  showHidden: document.getElementById('showHidden'),
+  showNodes: document.getElementById('showNodes'),
   statNodes: document.getElementById('statNodes'),
   statEdges: document.getElementById('statEdges'),
   statSettled: document.getElementById('statSettled'),
@@ -48,11 +51,17 @@ const app = {
 function buildWorld(seed) {
   app.seed = seed;
   app.scene = buildScene(seed, {
-    cornerCount: 9,
+    // Deutlich unförmigere Polygone: viele Ecken, gebrochene Seiten und
+    // kräftige Auslenkung erzeugen echte Abzweigungen.
+    cornerCount: 11,
     cornerSegments: 3,
+    segmentDent: 0.34,
     rings: Number(ui.density.value),
-    height: 3.4,
+    // Deutlich höher als breit, damit sich die Ringe nicht überlagern.
+    height: 5.0,
     radius: 1.5,
+    jitter: 0.2,
+    ribEvery: 1,
   });
   app.graph = buildGraph(app.scene);
   const { startId, targetId } = pickEndpoints(app.graph, app.scene);
@@ -65,18 +74,24 @@ function buildWorld(seed) {
     app.renderer.scene = app.scene;
     app.renderer.graph = app.graph;
   }
+  // Anzeigeoptionen aus den Bedienelementen übernehmen.
+  app.renderer.showDistances = ui.showDist.checked;
+  app.renderer.showHidden = ui.showHidden.checked;
+  app.renderer.showNodes = ui.showNodes.checked ? 'on' : 'off';
+  // Jede neue Szene beginnt mit demselben Blick: schräg von oben.
+  app.renderer.resetView();
 
-  resetSearch();
+  resetSearch(true);
   updateStaticStats();
   ui.summary.textContent = '';
 }
 
-function resetSearch() {
+function resetSearch(autoStart = false) {
   app.state = initDijkstra(app.graph, app.startId);
   app.state.targetId = app.targetId;
   app.state.justSettledId = null;
   app.phase = 'growing';
-  app.running = false;
+  app.running = autoStart;
   app.growLevel = 0;
   app.growTimer = 0;
   app.traceIndex = 0;
@@ -88,7 +103,7 @@ function resetSearch() {
     n.visible = false;
   }
   app.renderer.maxDist = Infinity;
-  ui.playPause.textContent = 'Start';
+  ui.playPause.textContent = autoStart ? 'Pause' : 'Start';
   ui.progress.style.width = '0%';
   updateStats();
 }
@@ -113,7 +128,7 @@ function updateStats() {
     growing: 'Schlauch waechst ...',
     search: 'suche ...',
     searching: 'suche ...',
-    tracing: 'Weg zurueckverfolgen ...',
+    tracing: 'Weg zurückverfolgen ...',
     done: 'fertig',
   };
   ui.statState.textContent = labels[app.phase] || 'bereit';
@@ -180,7 +195,7 @@ function advanceGrowth(dt) {
   }
 }
 
-/** Ein animierter Schritt des Dijkstra bzw. des Rueckverfolgens. */
+/** Ein animierter Schritt des Dijkstra. */
 function advance() {
   if (app.phase !== 'searching') return;
 
@@ -191,33 +206,39 @@ function advance() {
   for (const n of app.graph.nodes) if (Number.isFinite(n.dist) && n.dist > max) max = n.dist;
   app.renderer.maxDist = max || 1;
 
-  const targetReached = Number.isFinite(app.graph.nodes[app.targetId].dist);
-  if (!more || targetReached) startTracing();
+  // Die Suche läuft vollständig durch, damit man alle Abzweigungen sieht.
+  // Erst wenn die Warteschlange leer ist, wird der gefundene Weg nachgezeichnet.
+  if (!more) startTracing();
   updateStats();
 }
-/** Startet das langsame Zurueckverfolgen des kuerzesten Weges. */
+
+/**
+ * Startet das langsame Nachzeichnen des kürzesten Weges.
+ * Wird erst aufgerufen, nachdem der Turm vollständig aufgebaut ist und die
+ * Suche alle Knoten abgearbeitet hat.
+ */
 function startTracing() {
   const path = shortestPath(app.state, app.targetId);
   if (!path) {
     app.phase = 'done';
     app.running = false;
     ui.playPause.textContent = 'Start';
-    ui.summary.textContent = 'Ziel wurde nicht erreicht - die Rippen haben eine unpassierbare Luecke.';
+    ui.summary.textContent = 'Ziel wurde nicht erreicht - die Rippen haben eine unpassierbare Lücke.';
     return;
   }
   app.tracePath = path;
   app.traceIndex = 0;
   app.phase = 'tracing';
-  app.traceTimer = 0.05;
+  app.traceTimer = 0.35;
 
   for (const n of app.graph.nodes) n.onPath = false;
   for (const e of app.graph.edges) e.usedInPath = false;
 
-  ui.summary.textContent = `Kuerzester Weg gefunden: ${path.edges.length} Striche, Laenge ${path.length.toFixed(3)}`;
+  ui.summary.textContent = `Kürzester Weg gefunden: ${path.edges.length} Striche, Länge ${path.length.toFixed(3)}`;
   updateStats();
 }
 
-/** Setzt Schritt fuer Schritt den Weg frei (leuchtet langsam auf). */
+/** Setzt Schritt für Schritt den Weg frei (leuchtet langsam auf). */
 function advanceTrace() {
   const path = app.tracePath;
   if (app.traceIndex >= path.edges.length) {
@@ -242,28 +263,40 @@ function advanceTrace() {
 /* ------------------------------ Interaktion ------------------------------ */
 
 function setRunning(value) {
-  if (app.phase === 'done') {
-    if (value) resetSearch();
+  // In der Aufbau- und Suchphase wird nur pausiert bzw. fortgesetzt.
+  if (app.phase !== 'done') {
+    app.running = value;
+    ui.playPause.textContent = value ? 'Pause' : 'Weiter';
     return;
   }
-  app.running = value;
-  ui.playPause.textContent = value ? 'Pause' : 'Weiter';
+  // Nach dem Ende startet der Knopf einen kompletten neuen Durchlauf.
+  if (value) {
+    resetSearch(true);
+  }
 }
 
-ui.playPause.addEventListener('click', () => setRunning(!app.running));
-ui.reset.addEventListener('click', () => resetSearch());
+/** Der Knopf schaltet um: läuft etwas, wird pausiert - sonst gestartet. */
+function toggleRunning() {
+  if (app.phase === 'done') {
+    resetSearch(true);
+    return;
+  }
+  setRunning(!app.running);
+}
+
+ui.playPause.addEventListener('click', toggleRunning);
+ui.reset.addEventListener('click', () => resetSearch(true));
+ui.resetView.addEventListener('click', () => app.renderer.resetView());
 
 ui.regenerate.addEventListener('click', () => {
   const seed = Math.floor(Math.random() * 1e9);
   ui.seed.value = seed;
   buildWorld(seed);
-  setRunning(true);
 });
 
 ui.seed.addEventListener('change', () => {
   const seed = Number(ui.seed.value) || 1;
   buildWorld(seed);
-  setRunning(true);
 });
 
 ui.speed.addEventListener('input', () => {
@@ -275,6 +308,12 @@ ui.density.addEventListener('input', () => {
 });
 ui.showDist.addEventListener('change', () => {
   app.renderer.showDistances = ui.showDist.checked;
+});
+ui.showHidden.addEventListener('change', () => {
+  app.renderer.showHidden = ui.showHidden.checked;
+});
+ui.showNodes.addEventListener('change', () => {
+  app.renderer.showNodes = ui.showNodes.checked ? 'on' : 'off';
 });
 
 // Maus: drehen, zoomen, Tooltip.
@@ -304,7 +343,7 @@ ui.canvas.addEventListener('pointermove', (e) => {
     ui.tooltip.style.left = `${e.clientX - rect.left + 14}px`;
     ui.tooltip.style.top = `${e.clientY - rect.top + 14}px`;
     const d = Number.isFinite(n.dist) ? n.dist.toFixed(3) : 'unerreicht';
-    ui.tooltip.textContent = `Knoten #${n.id} · Ring ${n.ring} · Hoehe ${n.pos.y.toFixed(2)} · dist ${d}`;
+    ui.tooltip.textContent = `Knoten #${n.id} · Ring ${n.ring} · Höhe ${n.pos.y.toFixed(2)} · dist ${d}`;
   } else {
     ui.tooltip.style.display = 'none';
   }
@@ -321,7 +360,7 @@ window.addEventListener('resize', () => app.renderer.resize());
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') {
     e.preventDefault();
-    setRunning(!app.running);
+    toggleRunning();
   }
   if (e.code === 'KeyR') {
     ui.regenerate.click();
@@ -333,6 +372,4 @@ window.addEventListener('keydown', (e) => {
 buildWorld(Number(ui.seed.value) || app.seed);
 app.lastTime = performance.now();
 requestAnimationFrame(loop);
-// Beim ersten Laden laeuft die Animation sofort los, damit man alles sieht.
-setRunning(true);
 

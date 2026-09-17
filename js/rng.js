@@ -1,6 +1,6 @@
 /**
  * Deterministischer Zufallsgenerator + einfaches Rauschen.
- * Damit laesst sich jede Szene ueber einen Seed reproduzieren.
+ * Damit lässt sich jede Szene über einen Seed reproduzieren.
  */
 
 /** Mulberry32 - kleiner, schneller, seedbarer PRNG. */

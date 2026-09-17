@@ -1,6 +1,6 @@
 /**
  * Zeichnet die Szene auf ein 2D-Canvas, projiziert aus 3D.
- * Keine Bibliotheken, damit die Datei einfach im Browser laeuft.
+ * Keine Bibliotheken, damit die Datei einfach im Browser läuft.
  */
 import { project } from './geometry.js';
 
@@ -35,9 +35,25 @@ export class Renderer {
     this.scene = scene;
     this.graph = graph;
     this.dpi = dpi;
-    this.view = { yaw: -0.6, pitch: 0.32, distance: 7.5, fov: 1.35, offsetY: 0 };
+    // Fester Startblick: Die Kamera schwebt auf Höhe 3.4 über der Szene und
+    // blickt schräg auf die Grundfläche hinab. Beide Werte sind nötig:
+    // cameraHeight hebt die Kamera an, pitch (positiv) kippt die Ansicht so,
+    // dass der Boden als Fläche sichtbar wird. Geprüft mit tools/check_view.ps1.
+    this.homeView = {
+      yaw: -0.6,
+      pitch: 0.55,
+      cameraHeight: 3.4,
+      distance: 9.0,
+      fov: 1.35,
+      offsetY: 30,
+    };
+    this.view = { ...this.homeView };
     this.hoverEdgeId = null;
     this.showDistances = false;
+    // showHidden: verborgene Rückseiten-Striche schwach andeuten (3D-Eindruck).
+    // showNodes: 'on' = kleine Verbindungspunkte, 'off' = nur Linien.
+    this.showHidden = true;
+    this.showNodes = 'on';
     this.maxDist = Infinity;
     this.projected = [];
     this.resize();
@@ -59,11 +75,16 @@ export class Renderer {
     this.view.pitch = Math.max(-1.2, Math.min(1.2, this.view.pitch + dy * 0.006));
   }
 
+  /** Setzt den Blick auf die feste Startansicht zurück (schräg von oben). */
+  resetView() {
+    this.view = { ...this.homeView };
+  }
+
   zoomBy(factor) {
     this.view.distance = Math.max(2.5, Math.min(20, this.view.distance * factor));
   }
 
-  /** Projektion fuer alle Knoten einmal pro Frame berechnen (Performance). */
+  /** Projektion für alle Knoten einmal pro Frame berechnen (Performance). */
   computeScreenNodes() {
     const view = this.view;
     const w = this.width, h = this.height;
@@ -96,19 +117,55 @@ export class Renderer {
     this.computeScreenNodes();
     this.drawFloor();
 
-    // Striche nach Tiefe sortiert zeichnen (hintere zuerst).
     const drawList = this.graph.edges
       .filter((e) => !opts.onlyPath || e.usedInPath)
       .filter((e) => this.isEdgeVisible(e))
       .map((e) => {
         const pa = this.projected[e.a], pb = this.projected[e.b];
-        return { e, pa, pb, depth: (pa.depth + pb.depth) * 0.5 };
+        // Ein Streckenzug liegt "hinten", wenn sein Mittelpunkt hinter dem
+        // Zentrum des Schlauches liegt. Solche Striche werden gedaempft,
+        // damit man die Form als Koerper und nicht als Knaeuel sieht.
+        const depth = (pa.depth + pb.depth) * 0.5;
+        const behind = this.isBehindCenter(e);
+        return { e, pa, pb, depth, behind };
       })
       .sort((u, v) => v.depth - u.depth);
 
-    for (const d of drawList) this.drawEdge(d, state);
+    // Erst alle hinteren Striche gedaempft, dann die vorderen kraeftig.
+    for (const d of drawList) {
+      if (d.behind) this.drawEdge(d, state, true);
+    }
+    for (const d of drawList) {
+      if (!d.behind) this.drawEdge(d, state, false);
+    }
+
     this.drawNodes(state, opts);
     if (this.showDistances) this.drawDistanceLabels();
+  }
+
+  /**
+   * Prueft, ob ein Strich auf der abgewandten Seite des Schlauches liegt.
+   * Dazu wird die Höhe des Strichs betrachtet: der Mittelpunkt des Ringes
+   * in dieser Höhe liegt näher an der Kamera als der Strich selbst.
+   */
+  isBehindCenter(edge) {
+    if (!this.showHidden) return false;
+    const a = this.projected[edge.a];
+    const b = this.projected[edge.b];
+    if (!a || !b) return false;
+    const mid = { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5, depth: (a.depth + b.depth) * 0.5 };
+    const center = this.projectCenterAt(mid.y, edge.level);
+    return center !== null && center.depth < mid.depth;
+  }
+
+  /** Projiziert den Mittelpunkt der Schlauchachse auf gleicher Höhe. */
+  projectCenterAt(screenY, level) {
+    if (!this.scene || !this.scene.center) return null;
+    const c = this.scene.center;
+    const rings = this.scene.rings || [];
+    const ring = rings[Math.min(rings.length - 1, Math.max(0, level || 0))];
+    const y = ring ? ring.y : 0;
+    return project({ x: c.x, y, z: c.z }, this.view, this.width, this.height);
   }
 
   /** Waehrend der Aufbauphase werden noch nicht erzeugte Ringe ausgeblendet. */
@@ -116,28 +173,29 @@ export class Renderer {
     const a = this.graph.nodes[edge.a];
     const b = this.graph.nodes[edge.b];
     if (a.visible === false || b.visible === false) return false;
-    // Eine Kante "zwischen" zwei Ringen erscheint erst, wenn der obere Ring da ist.
     return true;
   }
 
-  drawEdge(d, state) {
+  drawEdge(d, state, behind) {
     const ctx = this.ctx;
     const { e, pa, pb } = d;
     const dim = e.state === 'idle' && !e.usedInPath;
-    const baseWidth = e.kind === 'rib' ? 2.0 : 2.6;
-    const width = Math.max(0.8, baseWidth * ((pa.scale + pb.scale) / 2) * 0.9);
 
-    ctx.globalAlpha = dim ? 0.55 : 1;
+    // Feste, duenne Linienbreite: jede Strecke bleibt als klare Linie erkennbar.
+    const width = e.usedInPath ? 3.2 : (e.state === 'tree' ? 2.2 : 1.4);
+
+    ctx.globalAlpha = behind ? 0.16 : (dim ? 0.5 : 1);
     ctx.strokeStyle = this.edgeColor(e);
-    ctx.lineWidth = e.usedInPath ? width * 1.9 : width;
-    ctx.lineCap = 'round';
+    ctx.lineWidth = width;
+    // Scharfe Enden statt runder Kappen, sonst verschmieren kurze Striche.
+    ctx.lineCap = 'butt';
 
-    if (e.usedInPath) {
-      ctx.shadowColor = 'rgba(255, 224, 102, 0.9)';
-      ctx.shadowBlur = 14;
-    } else if (state && state.justRelaxed && state.justRelaxed.some((r) => r.edge === e)) {
-      ctx.shadowColor = 'rgba(120, 220, 255, 0.9)';
-      ctx.shadowBlur = 12;
+    if (!behind && e.usedInPath) {
+      ctx.shadowColor = 'rgba(255, 224, 102, 0.8)';
+      ctx.shadowBlur = 10;
+    } else if (!behind && state && state.justRelaxed && state.justRelaxed.some((r) => r.edge === e)) {
+      ctx.shadowColor = 'rgba(120, 220, 255, 0.8)';
+      ctx.shadowBlur = 8;
     }
 
     ctx.beginPath();
@@ -155,44 +213,53 @@ export class Renderer {
   }
 
   drawNodes(state, opts) {
+    if (this.showNodes === false) return;
+
     const ctx = this.ctx;
     const order = this.graph.nodes
       .map((n, i) => ({ n, p: this.projected[i] }))
       .sort((u, v) => v.p.depth - u.p.depth);
 
+    // Sehr kleiner Grundradius: die Linien bleiben die Hauptdarsteller.
+    const baseR = 1.5;
+
     for (const { n, p } of order) {
       if (opts.onlyPath && !n.onPath) continue;
       if (n.visible === false) continue;
-      const r = Math.max(1, Math.min(3.4, p.scale * 1.5));
-      let color = 'rgba(180, 200, 255, 0.45)';
-      let radius = r;
+
+      let color = null;
+      let radius = baseR;
 
       if (n.state === 'settled') {
         color = '#ffd166';
-        radius = r * 1.9;
+        radius = baseR * 1.5;
       } else if (n.state === 'queued') {
         color = 'rgba(120, 200, 255, 0.95)';
-        radius = r * 1.6;
+        radius = baseR * 1.3;
       }
       if (state && n.id === state.startId) {
         color = '#5ee1a8';
-        radius = r * 2.9;
+        radius = baseR * 2.6;
       } else if (state && n.id === state.targetId) {
         color = '#ff8fb1';
-        radius = r * 2.9;
+        radius = baseR * 2.6;
       }
       if (state && n.id === state.justSettledId) {
         color = '#ffffff';
-        radius = r * 3.6;
-        ctx.shadowColor = 'rgba(255,255,255,0.9)';
-        ctx.shadowBlur = 18;
+        radius = baseR * 2.4;
+      }
+
+      // Unauffaellige Verbindungspunkte werden nur als winziger Punkt gesetzt,
+      // damit die Striche klar getrennt bleiben.
+      if (color === null) {
+        if (this.showNodes === 'off') continue;
+        color = 'rgba(200, 214, 245, 0.7)';
       }
 
       ctx.beginPath();
       ctx.fillStyle = color;
       ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
       ctx.fill();
-      ctx.shadowBlur = 0;
     }
   }
 
@@ -210,7 +277,7 @@ export class Renderer {
     }
   }
 
-  /** Bodenraster fuer die Raumwirkung. */
+  /** Bodenraster für die Raumwirkung. */
   drawFloor() {
     const ctx = this.ctx;
     const gridHalf = 3.2, step = 0.4;
@@ -230,7 +297,7 @@ export class Renderer {
     ctx.stroke();
   }
 
-  /** Naechstgelegener Knoten zu einer Mausposition (Tooltip). */
+  /** Nächstgelegener Knoten zu einer Mausposition (Tooltip). */
   pickNode(mx, my) {
     if (this.projected.length === 0) return null;
     let best = null;

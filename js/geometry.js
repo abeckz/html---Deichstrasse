@@ -1,6 +1,6 @@
 /**
- * Kleine Vektor- und Geometriehelfer fuer die 3D-Szene.
- * Koordinaten: x nach rechts, y nach oben, z in die Tiefe (Hoehe des Schlauches = y).
+ * Kleine Vektor- und Geometriehelfer für die 3D-Szene.
+ * Koordinaten: x nach rechts, y nach oben, z in die Tiefe (Höhe des Schlauches = y).
  * Die "Bodenebene" des Polygons ist also x-z.
  */
 
@@ -28,15 +28,20 @@ export function rotate(p, yaw, pitch) {
 }
 
 /**
- * Perspektivprojektion auf die Canvasflaeche.
- * Kamera blickt entlang -z, das Polygon liegt um den Ursprung.
+ * Perspektivprojektion auf die CanvasFläche.
+ *
+ * Die Kamera schwebt bei (0, cameraHeight, distance) und schaut auf die
+ * GrundFläche hinab. `pitch` kippt zusätzlich die Ansicht. Damit ist der
+ * Blick von oben physikalisch eindeutig und nicht nur eine Verzerrung.
+ *
+ * In Canvas zeigt y nach unten, daher wird der gedrehte y-Wert abgezogen.
  */
 export function project(p, view, w, h) {
-  const r = rotate(p, view.yaw, view.pitch);
-  const zc = r.z + view.distance;
-  const safe = Math.max(zc, 0.2);
-  const fov = view.fov * (Math.min(w, h) / 2);
-  const k = fov / safe;
+  const camY = view.cameraHeight || 0;
+  const r = rotate(v3(p.x, p.y - camY, p.z), view.yaw, view.pitch);
+
+  const zc = Math.max(r.z + view.distance, 0.2);
+  const k = (view.fov * (Math.min(w, h) / 2)) / zc;
   return {
     x: w / 2 + r.x * k,
     y: h / 2 - r.y * k + view.offsetY,
@@ -57,7 +62,7 @@ export function pointInPolygon2D(px, pz, poly) {
   return inside;
 }
 
-/** Flaechenschwerpunkt eines Polygons in der x-z-Ebene. */
+/** Flächenschwerpunkt eines Polygons in der x-z-Ebene. */
 export function centroid2D(poly) {
   let a = 0, cx = 0, cz = 0;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -71,7 +76,7 @@ export function centroid2D(poly) {
   return { x: cx / (6 * a), z: cz / (6 * a) };
 }
 
-/** Sortiert Punkte nach Winkel um einen Mittelpunkt (fuer unregelmaessige Ringe). */
+/** Sortiert Punkte nach Winkel um einen Mittelpunkt (für unregelmäßige Ringe). */
 export function sortByAngle(points, center) {
   return points
     .map((p) => ({ p, a: Math.atan2(p.z - center.z, p.x - center.x) }))
