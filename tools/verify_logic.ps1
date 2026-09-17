@@ -1,6 +1,6 @@
-ï»¿# Logiktest: bildet die Kernformeln von rng/generator/graph/dijkstra in
+# Logiktest: bildet die Kernformeln von rng/generator/graph/dijkstra in
 # PowerShell nach und prueft sie gegen Bellman-Ford und BFS.
-# Zweck: unabhaengige Verifikation der JS-Logik, da hier kein Node/Python lÃ¤uft.
+# Zweck: unabhaengige Verifikation der JS-Logik, da hier kein Node/Python läuft.
 
 $ErrorActionPreference = 'Stop'
 
@@ -36,7 +36,7 @@ function Get-Noise($values, $t) {
 }
 
 # --- Szenenparameter wie in main.js / generator.js -------------------------
-$cornerCount = 11
+$cornerCount = 12
 $cornerSegments = 3
 $rings = 7
 $height = 5.0
@@ -49,7 +49,7 @@ function Build-SeedWorld([int]$seed) {
   $nA = Set-Noise 16
   $nB = Set-Noise 24
 
-  # 1) unregelmÃ¤ÃŸiges Grundpolygon in der x-z-Ebene
+  # 1) unregelmäßiges Grundpolygon in der x-z-Ebene
   $corners = @()
   for ($i = 0; $i -lt $cornerCount; $i++) {
     $angle = ($i / $cornerCount) * 2 * [math]::PI + ((Get-Rand) - 0.5) * 0.24
@@ -58,7 +58,7 @@ function Build-SeedWorld([int]$seed) {
     $corners += [pscustomobject]@{ x = [math]::Cos($angle) * $rad; z = [math]::Sin($angle) * $rad }
   }
 
-  # FlÃ¤chenschwerpunkt des Grundpolygons
+  # Flächenschwerpunkt des Grundpolygons
   $area = 0.0; $cx = 0.0; $cz = 0.0
   for ($i = 0; $i -lt $cornerCount; $i++) {
     $j = ($i + $cornerCount - 1) % $cornerCount
@@ -147,7 +147,7 @@ $perRing = $cornerCount * $cornerSegments
     }
   }
 
-  # 4) Rippen mit LÃ¼cken, aber mindestens eine pro Ringpaar
+  # 4) Rippen mit Lücken, aber mindestens eine pro Ringpaar
   for ($r = 0; $r -lt $rings - 1; $r++) {
     $built = 0
     for ($i = 0; $i -lt $perRing; $i++) {
@@ -243,9 +243,9 @@ $ribEdges = @($world.edges | Where-Object { $_.kind -eq 'rib' })
 $radii = $world.corners | ForEach-Object { [math]::Sqrt(($_.x - $world.center.x) * ($_.x - $world.center.x) + ($_.z - $world.center.z) * ($_.z - $world.center.z)) }
 $rMin = ($radii | Measure-Object -Minimum).Minimum
 $rMax = ($radii | Measure-Object -Maximum).Maximum
-Write-Host ("Ecken: {0}, FlÃ¤che: {1:N3}, Radien {2:N3} .. {3:N3}" -f $world.corners.Count, $world.area, $rMin, $rMax)
+Write-Host ("Ecken: {0}, Fläche: {1:N3}, Radien {2:N3} .. {3:N3}" -f $world.corners.Count, $world.area, $rMin, $rMax)
 Write-Host ("Knoten: {0}, Striche: {1} (Ring {2}, Rippen {3})" -f $world.nodes.Count, $world.edges.Count, $ringEdges.Count, $ribEdges.Count)
-Write-Host ("Grundpolygon unregelmÃ¤ÃŸig: {0}" -f (($rMax - $rMin) -gt 0.05))
+Write-Host ("Grundpolygon unregelmäßig: {0}" -f (($rMax - $rMin) -gt 0.05))
 Write-Host ("Ringe verbunden: {0}" -f ($ribEdges.Count -ge ($rings - 1)))
 
 # --- Test 2: Dijkstra gegen Bellman-Ford ------------------------------------
@@ -265,7 +265,7 @@ foreach ($n in $world.nodes) {
   if ($inf1 -ne $inf2) { $mismatch++; continue }
   if (-not $inf1 -and [math]::Abs($x1 - $x2) -gt 1e-9) { $mismatch++ }
 }
-Write-Host ("Start #{0} (HÃ¶he {1:N2}), Ziel #{2} (HÃ¶he {3:N2})" -f $start.id, $start.y, $target.id, $target.y)
+Write-Host ("Start #{0} (Höhe {1:N2}), Ziel #{2} (Höhe {3:N2})" -f $start.id, $start.y, $target.id, $target.y)
 Write-Host ("abgearbeitete Knoten: {0} von {1}" -f $dij.settled, $world.nodes.Count)
 Write-Host ("Abweichungen Dijkstra/Bellman-Ford: {0}" -f $mismatch)
 
@@ -299,7 +299,7 @@ if ([double]::IsPositiveInfinity($targetDist)) {
   Write-Host ("Weg: {0} Striche ({1} Ringstriche, {2} Rippen), Summe {3:N3}, Dijkstra {4:N3}" -f ($path.Count - 1), $kinds['ring'], $kinds['rib'], $sum, $targetDist)
   Write-Host ("Wegekanten existieren und Summe stimmt: {0}" -f ($edgesOk -and ([math]::Abs($sum - $targetDist) -lt 1e-9)))
   Write-Host ("Weg >= Luftlinie ({0:N3}): {1}" -f $straight, ($targetDist -ge $straight - 1e-9))
-  Write-Host ("HÃ¶he {0:N2} -> {1:N2}, monoton steigend: {2}" -f $heights[0], $heights[$heights.Count - 1], $mono)
+  Write-Host ("Höhe {0:N2} -> {1:N2}, monoton steigend: {2}" -f $heights[0], $heights[$heights.Count - 1], $mono)
 }
 
 # --- Test 4: viele Seeds erreichbar -----------------------------------------

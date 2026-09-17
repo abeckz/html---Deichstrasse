@@ -114,7 +114,7 @@ export function dijkstraStep(state, steps = 1) {
         state.queue.push(otherId, candidate);
         state.justRelaxed.push({ nodeId: otherId, edge });
       } else if (!edge.usedInPath) {
-        // Nur Kanten, die nicht schon zum vorlaeufigen Weg gehoeren, werden
+        // Nur Kanten, die nicht schon zum vorläufigen Weg gehören, werden
         // als verworfen markiert - sonst flackert die Anzeige.
         edge.state = 'rejected';
       }

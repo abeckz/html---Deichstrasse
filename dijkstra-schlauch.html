@@ -257,7 +257,10 @@ button.primary:hover { background: linear-gradient(180deg, #3468e6, #2450b8); }
       <div class="row" style="margin-top: 8px;">
         <button id="resetView">Blick zurücksetzen</button>
       </div>
-      <p class="hint">Leertaste = Start/Pause &middot; R = neue Szene &middot; Ziehen = drehen &middot; Rad = zoomen</p>
+      <p class="hint">
+        Leertaste = Start/Pause &middot; R = neue Szene &middot; 0 = Blick zurücksetzen<br />
+        Ziehen = drehen &middot; <b>Strg + Ziehen = verschieben</b> &middot; Umschalt + Ziehen = Höhe &middot; Rad = zoomen
+      </p>
     </section>
 
     <section class="group">
@@ -369,9 +372,15 @@ function makeNoise1D(rng, points = 12) {
 
 /* ---------------------------- geometry.js ---------------------------- */
 /**
- * Kleine Vektor- und Geometriehelfer für die 3D-Szene.
- * Koordinaten: x nach rechts, y nach oben, z in die Tiefe (Höhe des Schlauches = y).
- * Die "Bodenebene" des Polygons ist also x-z.
+ * Vektor- und Geometriehelfer sowie eine echte Kamera für die 3D-Szene.
+ *
+ * Koordinatensystem: x nach rechts, y nach oben, z in die Tiefe.
+ * Die Grundfläche der Polygone liegt in der x-z-Ebene bei y = 0.
+ *
+ * Für den Blick von schräg oben gibt es `makeLookAtCamera`: sie erzeugt aus
+ * einem echten Kamerastandort und einem Blickziel die drei Achsen
+ * (right, up, forward) und projiziert damit korrekt. Damit ist "von oben"
+ * eine Eigenschaft der Kameraposition und keine Einstellungssache.
  */
 
 const v3 = (x = 0, y = 0, z = 0) => ({ x, y, z });
@@ -382,41 +391,72 @@ const scale = (a, s) => v3(a.x * s, a.y * s, a.z * s);
 const len = (a) => Math.hypot(a.x, a.y, a.z);
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 
+function norm(a) {
+  const l = len(a) || 1;
+  return v3(a.x / l, a.y / l, a.z / l);
+}
+
+function cross(a, b) {
+  return v3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+}
+
+function dot(a, b) {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
 function lerp3(a, b, t) {
   return v3(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
 }
 
-/** Rotation um die Y-Achse (Drehen des Schlauches) und anschliessend um X (Kippen). */
-function rotate(p, yaw, pitch) {
-  const cy = Math.cos(yaw), sy = Math.sin(yaw);
-  const x1 = p.x * cy - p.z * sy;
-  const z1 = p.x * sy + p.z * cy;
-  const cx = Math.cos(pitch), sx = Math.sin(pitch);
-  const y1 = p.y * cx - z1 * sx;
-  const z2 = p.y * sx + z1 * cx;
-  return v3(x1, y1, z2);
+/**
+ * Erzeugt eine Kamera, die von `eye` auf `target` blickt.
+ *
+ * Die Kamera schaut entlang der positiven forward-Achse. `upHint` gibt die
+ * ungefähre Hochrichtung an; daraus werden right und up orthogonal berechnet.
+ */
+function makeLookAtCamera(eye, target, upHint = v3(0, 1, 0), fov = 1.34) {
+  const forward = norm(sub(target, eye));
+  let up = norm(upHint);
+
+  // right = forward x up  (zeigt nach rechts im Bild)
+  let right = cross(forward, up);
+  if (len(right) < 1e-6) {
+    // Sonderfall: Blick fast parallel zu up, anderes up verwenden
+    up = v3(0, 0, 1);
+    right = cross(forward, up);
+  }
+  right = norm(right);
+  // up neu berechnen, damit alle drei Achsen exakt senkrecht stehen
+  up = norm(cross(right, forward));
+
+  return { eye, forward, right, up, fov };
 }
 
 /**
- * Perspektivprojektion auf die CanvasFläche.
+ * Projiziert einen Weltpunkt mit einer echten Kamera.
  *
- * Die Kamera schwebt bei (0, cameraHeight, distance) und schaut auf die
- * GrundFläche hinab. `pitch` kippt zusätzlich die Ansicht. Damit ist der
- * Blick von oben physikalisch eindeutig und nicht nur eine Verzerrung.
+ * 1. Vektor von der Kamera zum Punkt bilden.
+ * 2. In Kameraachsen zerlegen: rechts, oben, in Blickrichtung.
+ * 3. Perspektivisch teilen: weiter entfernte Punkte werden kleiner.
  *
- * In Canvas zeigt y nach unten, daher wird der gedrehte y-Wert abgezogen.
+ * In Canvas zeigt y nach unten, daher wird die Bild-Y-Koordinate negiert.
  */
-function project(p, view, w, h) {
-  const camY = view.cameraHeight || 0;
-  const r = rotate(v3(p.x, p.y - camY, p.z), view.yaw, view.pitch);
+function projectWithCamera(p, cam, w, h, panX = 0, panY = 0) {
+  const d = sub(p, cam.eye);
+  const cx = dot(d, cam.right);
+  const cy = dot(d, cam.up);
+  const cz = dot(d, cam.forward);
 
-  const zc = Math.max(r.z + view.distance, 0.2);
-  const k = (view.fov * (Math.min(w, h) / 2)) / zc;
+  // Punkte hinter der Kamera abfangen, sonst entstehen Spiegelbilder.
+  const safeZ = Math.max(cz, 0.05);
+  const k = (cam.fov * (Math.min(w, h) / 2)) / safeZ;
+
   return {
-    x: w / 2 + r.x * k,
-    y: h / 2 - r.y * k + view.offsetY,
-    depth: zc,
+    x: w / 2 + cx * k + panX,
+    y: h / 2 - cy * k + panY,
+    depth: safeZ,
     scale: k,
+    inFront: cz > 0.05,
   };
 }
 
@@ -436,17 +476,17 @@ function pointInPolygon2D(px, pz, poly) {
 function centroid2D(poly) {
   let a = 0, cx = 0, cz = 0;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const cross = poly[j].x * poly[i].z - poly[i].x * poly[j].z;
-    a += cross;
-    cx += (poly[j].x + poly[i].x) * cross;
-    cz += (poly[j].z + poly[i].z) * cross;
+    const crossV = poly[j].x * poly[i].z - poly[i].x * poly[j].z;
+    a += crossV;
+    cx += (poly[j].x + poly[i].x) * crossV;
+    cz += (poly[j].z + poly[i].z) * crossV;
   }
   a *= 0.5;
   if (Math.abs(a) < 1e-9) return { x: 0, z: 0 };
   return { x: cx / (6 * a), z: cz / (6 * a) };
 }
 
-/** Sortiert Punkte nach Winkel um einen Mittelpunkt (für unregelmäßige Ringe). */
+/** Sortiert Punkte nach Winkel um einen Mittelpunkt. */
 function sortByAngle(points, center) {
   return points
     .map((p) => ({ p, a: Math.atan2(p.z - center.z, p.x - center.x) }))
@@ -456,65 +496,56 @@ function sortByAngle(points, center) {
 
 /* ---------------------------- generator.js ---------------------------- */
 /**
- * Erzeugt die Szene:
- *  1. ein unregelmäßiges Polygon in der x-z-Ebene (random Ecken),
- *  2. darüber gestapelte, verformte Kopien ("Ringe"), die zusammen einen
- *     Schlauch bilden, dessen Waende aus einzelnen Strichen bestehen.
+ * Erzeugt die Szene: ein unregelmäßiges, konkaves Grundpolygon in der x-z-Ebene
+ * und darüber einen Turm aus stark verformten Ringen.
  *
- * Wichtig: Alle Rippen (vertikale Striche) und alle Ringstuecke werden
- * gleich behandelt - der Dijkstra läuft später über genau diese Striche.
+ * Ziel der Formgebung: echte Vielecke mit Zacken, Buchten und einspringenden
+ * Ecken - keine gleichmäßig abgerundeten "Quader". Dafür sorgen:
+ *   1. stark ungleiche Winkel zwischen den Ecken,
+ *   2. Radien mit großer Spannweite (Ausbuchtungen und Einbuchtungen),
+ *   3. gezielte Zacken und Einschnitte, die auch die Winkelordnung ändern,
+ *   4. ein prozeduraler "Wackel"-Anteil, der die Ringe gegeneinander versetzt.
  */
 
 
 /**
- * Ein Ring ist eine geschlossene Linie aus Segmenten. Damit man den Weg
- * "nach oben" wirklich suchen muss, ist jeder Ring in mehrere Striche
- * unterteilt, und die Ringe sind untereinander nur über die Rippen verbunden.
- */
-/**
- * Erzeugt das Grundpolygon in der x-z-Ebene.
+ * Baut ein konkaves, unregelmäßiges Polygon in der x-z-Ebene.
  *
- * Für eine wirklich unförmige Silhouette sorgen drei Dinge zusammen:
- *  1. ungleiche Winkel zwischen den Ecken (nicht gleichmäßig verteilt),
- *  2. stark schwankende Radien (Ausbuchtungen und Einbuchtungen),
- *  3. zusätzliche "Zacken": einzelne Ecken werden weit nach außen gezogen.
- * Dadurch entstehen konkave Stellen mit echten Abzweigungen.
+ * Die Ecken werden über eine Winkelreihenfolge verteilt und mit stark
+ * schwankenden Radien versehen. Ein Teil der Ecken wird zusätzlich seitlich
+ * verschoben, sodass die Kanten in unterschiedliche Richtungen zeigen.
  */
 function buildBasePolygon(rng, opts) {
-  const { cornerCount, radius, jitter, noise } = opts;
+  const { cornerCount, radius, noise, spikeChance, dentChance } = opts;
   const corners = [];
 
   for (let i = 0; i < cornerCount; i++) {
     const u = i / cornerCount;
-
-    // 1. ungleiche Winkel: jeder Schritt schwankt deutlich
     const step = (Math.PI * 2) / cornerCount;
-    const angle = i * step + rng.range(-step * 0.35, step * 0.35);
 
-    // 2. Radien mit großer Spannweite: Ausbuchtungen und Einbuchtungen
-    const wobble = 1 + noise(u) * 0.55;
-    const local = 1 + rng.range(-jitter * 2.2, jitter * 2.2);
+    // 1. stark ungleiche Winkel: bis zu 45 % Abweichung pro Schritt
+    const angle = i * step + rng.range(-step * 0.45, step * 0.45);
 
-    // 3. Zacken: etwa jede vierte Ecke wird deutlich nach außen gezogen
-    const spike = rng() < 0.28 ? rng.range(1.25, 1.7) : 1;
-    // und etwa jede fünfte Ecke nach innen gedrückt
-    const dent = rng() < 0.2 ? rng.range(0.55, 0.78) : 1;
+    // 2. Radien mit großer Spannweite
+    const wobble = 1 + noise(u) * 0.6;
+    const local = 1 + rng.range(-0.4, 0.4);
+
+    // 3. Zacken nach außen und Einschnitte nach innen
+    const spike = rng() < spikeChance ? rng.range(1.3, 1.95) : 1;
+    const dent = rng() < dentChance ? rng.range(0.45, 0.72) : 1;
 
     const r = radius * wobble * local * spike * dent;
-    corners.push(v3(Math.cos(angle) * r, 0, Math.sin(angle) * r));
-  }
-  return sortByAngle(corners, centroid2D(corners));
-}
+
+    // Zusätzliche seitliche Verschiebung: dadurch zeigen die Kanten in
+    // verschiedene Richtungen und das Vieleck wird wirklich unförmig.
 
 /**
- * Baut einen Ring in einer bestimmten Höhe aus einer Basisform auf.
- * Der Ring wird zusätzlich verdreht, geschrumpft/gestreckt und gedaempft
- * verformt, damit der Schlauch organisch wirkt.
+ * Baut einen Ring in einer bestimmten Höhe.
  *
- * Wichtig: die Seiten zwischen den Ecken sind keine geraden Linien. Jeder
- * Zwischenpunkt wird zur Seite hin verschoben (nach aussen oder innen), damit
- * die Silhouette unregelmäßig "eingekerbt" wirkt. Trotzdem bleibt jedes
- * Teilstueck eine eigene, klar sichtbare Strecke.
+ * Jeder Ring wird eigenständig verformt (nicht nur als Kopie verschoben):
+ * eigene Verdrehung, eigene Schrumpfung und eigene Auslenkung der
+ * Zwischenpunkte. Dadurch wird die Turmwand unregelmäßig und es entstehen
+ * viele unterschiedliche Striche.
  */
 function buildRing(base, center, level, rng, opts, noiseFns) {
   const t = level.height;
@@ -522,19 +553,23 @@ function buildRing(base, center, level, rng, opts, noiseFns) {
   const shrink = level.shrink;
   const bumpAmp = level.bumpAmp;
 
+  // Ecken dieses Ringes: verdreht, skaliert und mit eigenen Störungen
   const corners = base.map((c, i) => {
     const rel = { x: c.x - center.x, z: c.z - center.z };
     const cs = Math.cos(twist), sn = Math.sin(twist);
     const rx = rel.x * cs - rel.z * sn;
     const rz = rel.x * sn + rel.z * cs;
+
     const u = i / base.length;
-    const bump = 1 + noiseFns.a(u + t) * bumpAmp + noiseFns.b(u * 2 - t) * bumpAmp * 0.5;
-    const r = shrink * bump;
+    // weiche Welle plus harter, pro Ring wechselnder Anteil
+    const wave = noiseFns.a(u + t * 1.3) * bumpAmp + noiseFns.b(u * 2 - t) * bumpAmp * 0.5;
+    const jag = Math.sin((i * 2.3 + level.index * 2.7) * 2.1) * level.jagAmp;
+
+    const r = shrink * (1 + wave + jag);
     return v3(center.x + rx * r, level.y, center.z + rz * r);
   });
 
-  // Die Striche eines Ringes: jede Seite wird in `cornerSegments` Teilstuecke
-  // zerlegt, deren Zwischenpunkte seitlich ausgelenkt werden.
+  // Striche: jede Seite in mehrere Teilstücke, Zwischenpunkte ausgelenkt.
   const pts = [];
   const segs = opts.cornerSegments;
   const dent = opts.segmentDent;
@@ -544,42 +579,50 @@ function buildRing(base, center, level, rng, opts, noiseFns) {
     const b = corners[(i + 1) % corners.length];
     for (let s = 0; s < segs; s++) {
       const u = (i + s / segs) / corners.length;
-      const base = lerp3(a, b, s / segs);
+      const basePt = lerp3(a, b, s / segs);
       if (s === 0) {
-        // Die echte Ecke bleibt exakt erhalten - sonst verschwindet die Form.
-        pts.push(base);
+        // Die echte Ecke bleibt erhalten, sonst verschwindet die Form.
+        pts.push(basePt);
         continue;
       }
-      // Verschiebung senkrecht zur Seite, gesteuert durch zwei Rauschwerte,
-      // damit benachbarte Ringe unterschiedlich verformt sind. Ein zusätzlicher
-      // harter Anteil erzeugt einzelne scharfe Knicke statt nur weicher Wellen.
+
       const dx = b.x - a.x;
       const dz = b.z - a.z;
-      const len = Math.hypot(dx, dz) || 1;
-      const nx = -dz / len;
-      const nz = dx / len;
+      const l = Math.hypot(dx, dz) || 1;
+      const nx = -dz / l;
+      const nz = dx / l;
 
       const soft = noiseFns.a(u * 2.3 + t * 1.7) * 0.8 + noiseFns.b(u * 4.1 - t * 1.1) * 0.4;
-      // Der harte Anteil springt pro Ecke und Ringstufe zwischen zwei Werten.
-      const hard = Math.sin((i * 2.7 + level.index * 1.9) * 3.1) > 0.35 ? 0.85 : -0.5;
-      const amount = (soft + hard * 0.6) * dent;
+      const hard = Math.sin((i * 2.7 + level.index * 1.9) * 3.1) > 0.35 ? 0.9 : -0.55;
+      const amount = (soft + hard * 0.7) * dent;
 
-      pts.push(v3(base.x + nx * amount, base.y, base.z + nz * amount));
+      // Zusätzlich Verschiebung in der Höhe: die Ringe sind nicht eben,
+      // dadurch entstehen schräge, unterschiedlich lange Striche.
+      const lift = Math.sin((i + 1) * 1.7 + level.index * 2.3) * level.warpAmp;
+
+      pts.push(v3(basePt.x + nx * amount, basePt.y + lift, basePt.z + nz * amount));
     }
   }
   return { points: pts, corners, y: level.y, index: level.index };
 }
 
+    const sideShift = rng.range(-0.35, 0.35) * radius;
+
+    corners.push(v3(
+      Math.cos(angle) * r + sideShift,
+      0,
 function buildScene(seed = 20260917, options = {}) {
   const opts = {
-    cornerCount: 11,
-    cornerSegments: 3, // Unterteilung pro Polygonecke -> Striche pro Ring
-    segmentDent: 0.34, // seitliche Auslenkung der Zwischenpunkte (unregelmäßige Seiten)
+    cornerCount: 12,
+    cornerSegments: 3,
+    segmentDent: 0.38,
+    spikeChance: 0.35,
+    dentChance: 0.3,
     rings: 7,
-    height: 3.2,
+    height: 5.0,
     radius: 1.5,
-    jitter: 0.2,
-    ribEvery: 1, // jede n-te Rippe wird tatsächlich gebaut (Lücken erzeugen Umwege)
+    jitter: 0.3,
+    ribEvery: 1,
     ...options,
   };
 
@@ -591,22 +634,26 @@ function buildScene(seed = 20260917, options = {}) {
   const basePolygon = buildBasePolygon(rng, {
     cornerCount: opts.cornerCount,
     radius: opts.radius,
-    jitter: opts.jitter,
     noise: noiseA,
+    spikeChance: opts.spikeChance,
+    dentChance: opts.dentChance,
   });
   const center = centroid2D(basePolygon);
 
-  // Höhenstufen des Schlauches mit leicht Zufälliger Verteilung.
+  // Höhenstufen: jede mit eigenen Verformungsstärken, damit sich die Ringe
+  // deutlich voneinander unterscheiden.
   const levels = [];
   for (let i = 0; i < opts.rings; i++) {
-    const t = i / (opts.rings - 1);
+    const t = i / (opts.rings - 1 || 1);
     levels.push({
       index: i,
       height: t,
       y: t * opts.height,
-      twist: t * rng.range(0.6, 1.6) + rng.range(-0.05, 0.05),
-      shrink: 1 - t * rng.range(0.05, 0.3),
-      bumpAmp: rng.range(0.06, 0.2),
+      twist: t * rng.range(0.5, 1.5) + rng.range(-0.1, 0.1),
+      shrink: 1 - t * rng.range(0.05, 0.35),
+      bumpAmp: rng.range(0.08, 0.22),
+      jagAmp: rng.range(0.04, 0.14),
+      warpAmp: rng.range(0.02, 0.09),
     });
   }
 
@@ -621,6 +668,12 @@ function buildScene(seed = 20260917, options = {}) {
     rings,
     totalHeight: opts.height,
   };
+}
+
+      Math.sin(angle) * r + rng.range(-0.35, 0.35) * radius,
+    ));
+  }
+  return sortByAngle(corners, centroid2D(corners));
 }
 
 /* ---------------------------- graph.js ---------------------------- */
@@ -853,7 +906,7 @@ function dijkstraStep(state, steps = 1) {
         state.queue.push(otherId, candidate);
         state.justRelaxed.push({ nodeId: otherId, edge });
       } else if (!edge.usedInPath) {
-        // Nur Kanten, die nicht schon zum vorlaeufigen Weg gehoeren, werden
+        // Nur Kanten, die nicht schon zum vorläufigen Weg gehören, werden
         // als verworfen markiert - sonst flackert die Anzeige.
         edge.state = 'rejected';
       }
@@ -919,19 +972,19 @@ class Renderer {
     this.scene = scene;
     this.graph = graph;
     this.dpi = dpi;
-    // Fester Startblick: Die Kamera schwebt auf Höhe 3.4 über der Szene und
-    // blickt schräg auf die Grundfläche hinab. Beide Werte sind nötig:
-    // cameraHeight hebt die Kamera an, pitch (positiv) kippt die Ansicht so,
-    // dass der Boden als Fläche sichtbar wird. Geprüft mit tools/check_view.ps1.
-    this.homeView = {
-      yaw: -0.6,
-      pitch: 0.55,
-      cameraHeight: 3.4,
-      distance: 9.0,
-      fov: 1.35,
-      offsetY: 30,
-    };
-    this.view = { ...this.homeView };
+
+    // Startansicht: Der Blick kommt eindeutig von schräg oben.
+    //
+    // Die Kamera steht dabei RÄUMLICH ÜBER der Szene:
+    //   eye  = (0, 4.8, 6.5)   -> 4.8 Einheiten hoch, 6.5 vor der Mitte
+    //   target = (0, 1.8, 0)   -> Blickziel in Turmmitte
+    // Damit blickt sie um atan(3.0 / 6.5) ≈ 24.8 Grad nach unten.
+    // Zusätzlich dreht `orbit` die Kamera um die Szene (Maus-Ziehen).
+    this.home = { orbit: -0.55, eyeHeight: 4.8, distance: 6.5, targetHeight: 1.6, fov: 1.35 };
+    this.camera = { ...this.home };
+    this.panX = 0;
+    this.panY = 0;
+
     this.hoverEdgeId = null;
     this.showDistances = false;
     // showHidden: verborgene Rückseiten-Striche schwach andeuten (3D-Eindruck).
@@ -940,6 +993,7 @@ class Renderer {
     this.showNodes = 'on';
     this.maxDist = Infinity;
     this.projected = [];
+    this.cam = null;
     this.resize();
   }
 
@@ -954,25 +1008,57 @@ class Renderer {
     this.ctx.setTransform(this.dpi, 0, 0, this.dpi, 0, 0);
   }
 
-  rotateBy(dx, dy) {
-    this.view.yaw += dx * 0.006;
-    this.view.pitch = Math.max(-1.2, Math.min(1.2, this.view.pitch + dy * 0.006));
+  /** Berechnet aus den Kameraparametern die Kameraachsen für diesen Frame. */
+  updateCamera() {
+    const c = this.camera;
+    const eye = {
+      x: Math.sin(c.orbit) * c.distance,
+      y: c.eyeHeight,
+      z: Math.cos(c.orbit) * c.distance,
+    };
+    const target = { x: 0, y: c.targetHeight, z: 0 };
+    this.cam = makeLookAtCamera(eye, target, { x: 0, y: 1, z: 0 }, c.fov);
   }
 
-  /** Setzt den Blick auf die feste Startansicht zurück (schräg von oben). */
+  /** Maus-Ziehen: Kamera um die Szene drehen (waagerecht/waagerecht kippen). */
+  rotateBy(dx, dy) {
+    this.camera.orbit += dx * 0.008;
+    // Höhe der Kamera verändern: nach oben ziehen hebt die Kamera an.
+    this.camera.eyeHeight = Math.max(0.6, Math.min(14, this.camera.eyeHeight + dy * 0.02));
+  }
+
+  /**
+   * Verschieben der Ansicht (Strg + Maus ziehen).
+   * Verschiebt die gesamte Projektion in Bildschirmkoordinaten.
+   */
+  panBy(dx, dy) {
+    this.panX += dx;
+    this.panY += dy;
+  }
+
+  /** Setzt Blick und Verschiebung auf die Startansicht zurück. */
   resetView() {
-    this.view = { ...this.homeView };
+    this.camera = { ...this.home };
+    this.panX = 0;
+    this.panY = 0;
   }
 
   zoomBy(factor) {
-    this.view.distance = Math.max(2.5, Math.min(20, this.view.distance * factor));
+    this.camera.distance = Math.max(2.5, Math.min(24, this.camera.distance * factor));
   }
 
   /** Projektion für alle Knoten einmal pro Frame berechnen (Performance). */
   computeScreenNodes() {
-    const view = this.view;
+    this.updateCamera();
+    const cam = this.cam;
     const w = this.width, h = this.height;
-    this.projected = this.graph.nodes.map((n) => project(n.pos, view, w, h));
+    this.projected = this.graph.nodes.map((n) =>
+      projectWithCamera(n.pos, cam, w, h, this.panX, this.panY));
+  }
+
+  /** Projektion eines beliebigen Weltpunkts (für Raster und Schwerpunkt). */
+  projectPoint(p) {
+    return projectWithCamera(p, this.cam, this.width, this.height, this.panX, this.panY);
   }
 
   edgeColor(edge) {
@@ -1028,28 +1114,31 @@ class Renderer {
   }
 
   /**
-   * Prueft, ob ein Strich auf der abgewandten Seite des Schlauches liegt.
-   * Dazu wird die Höhe des Strichs betrachtet: der Mittelpunkt des Ringes
-   * in dieser Höhe liegt näher an der Kamera als der Strich selbst.
+   * Prüft, ob ein Strich auf der abgewandten Seite des Turms liegt.
+   *
+   * Rechnet im Weltraum: Liegt der Stichmittelpunkt weiter von der Kamera
+   * entfernt als die Turmachse auf gleicher Höhe, ist er auf der Rückseite.
+   * Solche Striche werden nur schwach angedeutet, damit man einen Körper
+   * sieht und kein Gewirr.
    */
   isBehindCenter(edge) {
     if (!this.showHidden) return false;
-    const a = this.projected[edge.a];
-    const b = this.projected[edge.b];
-    if (!a || !b) return false;
-    const mid = { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5, depth: (a.depth + b.depth) * 0.5 };
-    const center = this.projectCenterAt(mid.y, edge.level);
-    return center !== null && center.depth < mid.depth;
-  }
+    const a = this.graph.nodes[edge.a];
+    const b = this.graph.nodes[edge.b];
+    if (!a || !b || !this.cam) return false;
 
-  /** Projiziert den Mittelpunkt der Schlauchachse auf gleicher Höhe. */
-  projectCenterAt(screenY, level) {
-    if (!this.scene || !this.scene.center) return null;
-    const c = this.scene.center;
-    const rings = this.scene.rings || [];
-    const ring = rings[Math.min(rings.length - 1, Math.max(0, level || 0))];
-    const y = ring ? ring.y : 0;
-    return project({ x: c.x, y, z: c.z }, this.view, this.width, this.height);
+    const eye = this.cam.eye;
+    const midX = (a.pos.x + b.pos.x) * 0.5;
+    const midY = (a.pos.y + b.pos.y) * 0.5;
+    const midZ = (a.pos.z + b.pos.z) * 0.5;
+
+    // Turmachse auf gleicher Höhe
+    const axisX = this.scene && this.scene.center ? this.scene.center.x : 0;
+    const axisZ = this.scene && this.scene.center ? this.scene.center.z : 0;
+
+    const dMid = Math.hypot(midX - eye.x, midY - eye.y, midZ - eye.z);
+    const dAxis = Math.hypot(axisX - eye.x, midY - eye.y, axisZ - eye.z);
+    return dMid > dAxis;
   }
 
   /** Waehrend der Aufbauphase werden noch nicht erzeugte Ringe ausgeblendet. */
@@ -1065,7 +1154,7 @@ class Renderer {
     const { e, pa, pb } = d;
     const dim = e.state === 'idle' && !e.usedInPath;
 
-    // Feste, duenne Linienbreite: jede Strecke bleibt als klare Linie erkennbar.
+    // Feste, dünne Linienbreite: jede Strecke bleibt als klare Linie erkennbar.
     const width = e.usedInPath ? 3.2 : (e.state === 'tree' ? 2.2 : 1.4);
 
     ctx.globalAlpha = behind ? 0.16 : (dim ? 0.5 : 1);
@@ -1164,15 +1253,15 @@ class Renderer {
   /** Bodenraster für die Raumwirkung. */
   drawFloor() {
     const ctx = this.ctx;
-    const gridHalf = 3.2, step = 0.4;
-    ctx.strokeStyle = 'rgba(90, 110, 160, 0.16)';
+    const gridHalf = 3.6, step = 0.5;
+    ctx.strokeStyle = 'rgba(90, 110, 160, 0.2)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let i = -gridHalf; i <= gridHalf + 1e-6; i += step) {
-      const a = project({ x: i, y: 0, z: -gridHalf }, this.view, this.width, this.height);
-      const b = project({ x: i, y: 0, z: gridHalf }, this.view, this.width, this.height);
-      const c = project({ x: -gridHalf, y: 0, z: i }, this.view, this.width, this.height);
-      const d = project({ x: gridHalf, y: 0, z: i }, this.view, this.width, this.height);
+      const a = this.projectPoint({ x: i, y: 0, z: -gridHalf });
+      const b = this.projectPoint({ x: i, y: 0, z: gridHalf });
+      const c = this.projectPoint({ x: -gridHalf, y: 0, z: i });
+      const d = this.projectPoint({ x: gridHalf, y: 0, z: i });
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.moveTo(c.x, c.y);
@@ -1248,16 +1337,17 @@ const app = {
 function buildWorld(seed) {
   app.seed = seed;
   app.scene = buildScene(seed, {
-    // Deutlich unförmigere Polygone: viele Ecken, gebrochene Seiten und
-    // kräftige Auslenkung erzeugen echte Abzweigungen.
-    cornerCount: 11,
+    // Echte, konkave Polygone: viele Ecken mit Zacken und Einschnitten.
+    cornerCount: 12,
     cornerSegments: 3,
-    segmentDent: 0.34,
+    segmentDent: 0.38,
+    spikeChance: 0.35,
+    dentChance: 0.3,
     rings: Number(ui.density.value),
     // Deutlich höher als breit, damit sich die Ringe nicht überlagern.
     height: 5.0,
     radius: 1.5,
-    jitter: 0.2,
+    jitter: 0.3,
     ribEvery: 1,
   });
   app.graph = buildGraph(app.scene);
@@ -1322,7 +1412,7 @@ function updateStats() {
   ui.statDist.textContent = Number.isFinite(target.dist) ? target.dist.toFixed(3) : '-';
 
   const labels = {
-    growing: 'Schlauch waechst ...',
+    growing: 'Schlauch wächst ...',
     search: 'suche ...',
     searching: 'suche ...',
     tracing: 'Weg zurückverfolgen ...',
@@ -1513,26 +1603,52 @@ ui.showNodes.addEventListener('change', () => {
   app.renderer.showNodes = ui.showNodes.checked ? 'on' : 'off';
 });
 
-// Maus: drehen, zoomen, Tooltip.
-let dragging = false, lastX = 0, lastY = 0;
+// Maussteuerung:
+//   Ziehen             = Ansicht drehen
+//   Strg + Ziehen      = Ansicht verschieben (Pan)
+//   Umschalt + Ziehen  = Kamerahöhe ändern
+//   Rad                = zoomen
+//   Zeigen             = Tooltip am Knoten
+let dragging = false, lastX = 0, lastY = 0, dragMode = 'orbit';
+
 ui.canvas.addEventListener('pointerdown', (e) => {
   dragging = true;
   lastX = e.clientX;
   lastY = e.clientY;
+  // Strg gedrückt: verschieben statt drehen
+  dragMode = e.ctrlKey || e.metaKey ? 'pan' : (e.shiftKey ? 'height' : 'orbit');
   ui.canvas.setPointerCapture(e.pointerId);
+  ui.canvas.style.cursor = dragMode === 'pan' ? 'move' : 'grabbing';
 });
+
 ui.canvas.addEventListener('pointerup', (e) => {
   dragging = false;
   if (ui.canvas.hasPointerCapture(e.pointerId)) ui.canvas.releasePointerCapture(e.pointerId);
+  ui.canvas.style.cursor = 'grab';
 });
+
 ui.canvas.addEventListener('pointermove', (e) => {
   const rect = ui.canvas.getBoundingClientRect();
+
   if (dragging) {
-    app.renderer.rotateBy(e.clientX - lastX, e.clientY - lastY);
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
     lastX = e.clientX;
     lastY = e.clientY;
+
+    if (dragMode === 'pan') {
+      // Verschieben: funktioniert auch, wenn mittendrin Strg losgelassen wird
+      // oder zusätzlich gedrückt wird, deshalb prüfen wir die Taste live.
+      if (e.ctrlKey || e.metaKey) app.renderer.panBy(dx, dy);
+      else app.renderer.rotateBy(dx, dy);
+    } else if (dragMode === 'height' || e.shiftKey) {
+      app.renderer.rotateBy(dx * 0.4, dy);
+    } else {
+      app.renderer.rotateBy(dx, dy);
+    }
     return;
   }
+
   const hit = app.renderer.pickNode(e.clientX - rect.left, e.clientY - rect.top);
   if (hit) {
     const n = hit.node;
@@ -1545,13 +1661,23 @@ ui.canvas.addEventListener('pointermove', (e) => {
     ui.tooltip.style.display = 'none';
   }
 });
+
 ui.canvas.addEventListener('pointerleave', () => {
   ui.tooltip.style.display = 'none';
 });
+
 ui.canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   app.renderer.zoomBy(e.deltaY > 0 ? 1.08 : 0.92);
 }, { passive: false });
+
+// Strg gedrückt halten zeigt den Verschiebe-Cursor an.
+window.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && !app.running) ui.canvas.style.cursor = 'move';
+});
+window.addEventListener('keyup', (e) => {
+  if (!e.ctrlKey && !e.metaKey) ui.canvas.style.cursor = dragging ? 'grabbing' : 'grab';
+});
 
 window.addEventListener('resize', () => app.renderer.resize());
 window.addEventListener('keydown', (e) => {
@@ -1562,6 +1688,10 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyR') {
     ui.regenerate.click();
   }
+  // Null setzt die Ansicht auf den Startblick zurück.
+  if (e.code === 'Digit0' || e.code === 'Numpad0') {
+    app.renderer.resetView();
+  }
 });
 
 /* --------------------------------- Start --------------------------------- */
@@ -1569,6 +1699,8 @@ window.addEventListener('keydown', (e) => {
 buildWorld(Number(ui.seed.value) || app.seed);
 app.lastTime = performance.now();
 requestAnimationFrame(loop);
+// Animation sofort starten: erst wächst der Turm, dann sucht Dijkstra.
+setRunning(true);
 
 </script>
 </body>

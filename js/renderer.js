@@ -2,7 +2,7 @@
  * Zeichnet die Szene auf ein 2D-Canvas, projiziert aus 3D.
  * Keine Bibliotheken, damit die Datei einfach im Browser läuft.
  */
-import { project } from './geometry.js';
+import { makeLookAtCamera, projectWithCamera } from './geometry.js';
 
 /** Farbskala von "sehr kurz" (gelb) nach "lang/unerreicht" (gedaempftes Blau). */
 function heatColor(t) {
@@ -35,19 +35,19 @@ export class Renderer {
     this.scene = scene;
     this.graph = graph;
     this.dpi = dpi;
-    // Fester Startblick: Die Kamera schwebt auf Höhe 3.4 über der Szene und
-    // blickt schräg auf die Grundfläche hinab. Beide Werte sind nötig:
-    // cameraHeight hebt die Kamera an, pitch (positiv) kippt die Ansicht so,
-    // dass der Boden als Fläche sichtbar wird. Geprüft mit tools/check_view.ps1.
-    this.homeView = {
-      yaw: -0.6,
-      pitch: 0.55,
-      cameraHeight: 3.4,
-      distance: 9.0,
-      fov: 1.35,
-      offsetY: 30,
-    };
-    this.view = { ...this.homeView };
+
+    // Startansicht: Der Blick kommt eindeutig von schräg oben.
+    //
+    // Die Kamera steht dabei RÄUMLICH ÜBER der Szene:
+    //   eye  = (0, 4.8, 6.5)   -> 4.8 Einheiten hoch, 6.5 vor der Mitte
+    //   target = (0, 1.8, 0)   -> Blickziel in Turmmitte
+    // Damit blickt sie um atan(3.0 / 6.5) ≈ 24.8 Grad nach unten.
+    // Zusätzlich dreht `orbit` die Kamera um die Szene (Maus-Ziehen).
+    this.home = { orbit: -0.55, eyeHeight: 4.8, distance: 6.5, targetHeight: 1.6, fov: 1.35 };
+    this.camera = { ...this.home };
+    this.panX = 0;
+    this.panY = 0;
+
     this.hoverEdgeId = null;
     this.showDistances = false;
     // showHidden: verborgene Rückseiten-Striche schwach andeuten (3D-Eindruck).
@@ -56,6 +56,7 @@ export class Renderer {
     this.showNodes = 'on';
     this.maxDist = Infinity;
     this.projected = [];
+    this.cam = null;
     this.resize();
   }
 
@@ -70,25 +71,57 @@ export class Renderer {
     this.ctx.setTransform(this.dpi, 0, 0, this.dpi, 0, 0);
   }
 
-  rotateBy(dx, dy) {
-    this.view.yaw += dx * 0.006;
-    this.view.pitch = Math.max(-1.2, Math.min(1.2, this.view.pitch + dy * 0.006));
+  /** Berechnet aus den Kameraparametern die Kameraachsen für diesen Frame. */
+  updateCamera() {
+    const c = this.camera;
+    const eye = {
+      x: Math.sin(c.orbit) * c.distance,
+      y: c.eyeHeight,
+      z: Math.cos(c.orbit) * c.distance,
+    };
+    const target = { x: 0, y: c.targetHeight, z: 0 };
+    this.cam = makeLookAtCamera(eye, target, { x: 0, y: 1, z: 0 }, c.fov);
   }
 
-  /** Setzt den Blick auf die feste Startansicht zurück (schräg von oben). */
+  /** Maus-Ziehen: Kamera um die Szene drehen (waagerecht/waagerecht kippen). */
+  rotateBy(dx, dy) {
+    this.camera.orbit += dx * 0.008;
+    // Höhe der Kamera verändern: nach oben ziehen hebt die Kamera an.
+    this.camera.eyeHeight = Math.max(0.6, Math.min(14, this.camera.eyeHeight + dy * 0.02));
+  }
+
+  /**
+   * Verschieben der Ansicht (Strg + Maus ziehen).
+   * Verschiebt die gesamte Projektion in Bildschirmkoordinaten.
+   */
+  panBy(dx, dy) {
+    this.panX += dx;
+    this.panY += dy;
+  }
+
+  /** Setzt Blick und Verschiebung auf die Startansicht zurück. */
   resetView() {
-    this.view = { ...this.homeView };
+    this.camera = { ...this.home };
+    this.panX = 0;
+    this.panY = 0;
   }
 
   zoomBy(factor) {
-    this.view.distance = Math.max(2.5, Math.min(20, this.view.distance * factor));
+    this.camera.distance = Math.max(2.5, Math.min(24, this.camera.distance * factor));
   }
 
   /** Projektion für alle Knoten einmal pro Frame berechnen (Performance). */
   computeScreenNodes() {
-    const view = this.view;
+    this.updateCamera();
+    const cam = this.cam;
     const w = this.width, h = this.height;
-    this.projected = this.graph.nodes.map((n) => project(n.pos, view, w, h));
+    this.projected = this.graph.nodes.map((n) =>
+      projectWithCamera(n.pos, cam, w, h, this.panX, this.panY));
+  }
+
+  /** Projektion eines beliebigen Weltpunkts (für Raster und Schwerpunkt). */
+  projectPoint(p) {
+    return projectWithCamera(p, this.cam, this.width, this.height, this.panX, this.panY);
   }
 
   edgeColor(edge) {
@@ -144,28 +177,31 @@ export class Renderer {
   }
 
   /**
-   * Prueft, ob ein Strich auf der abgewandten Seite des Schlauches liegt.
-   * Dazu wird die Höhe des Strichs betrachtet: der Mittelpunkt des Ringes
-   * in dieser Höhe liegt näher an der Kamera als der Strich selbst.
+   * Prüft, ob ein Strich auf der abgewandten Seite des Turms liegt.
+   *
+   * Rechnet im Weltraum: Liegt der Stichmittelpunkt weiter von der Kamera
+   * entfernt als die Turmachse auf gleicher Höhe, ist er auf der Rückseite.
+   * Solche Striche werden nur schwach angedeutet, damit man einen Körper
+   * sieht und kein Gewirr.
    */
   isBehindCenter(edge) {
     if (!this.showHidden) return false;
-    const a = this.projected[edge.a];
-    const b = this.projected[edge.b];
-    if (!a || !b) return false;
-    const mid = { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5, depth: (a.depth + b.depth) * 0.5 };
-    const center = this.projectCenterAt(mid.y, edge.level);
-    return center !== null && center.depth < mid.depth;
-  }
+    const a = this.graph.nodes[edge.a];
+    const b = this.graph.nodes[edge.b];
+    if (!a || !b || !this.cam) return false;
 
-  /** Projiziert den Mittelpunkt der Schlauchachse auf gleicher Höhe. */
-  projectCenterAt(screenY, level) {
-    if (!this.scene || !this.scene.center) return null;
-    const c = this.scene.center;
-    const rings = this.scene.rings || [];
-    const ring = rings[Math.min(rings.length - 1, Math.max(0, level || 0))];
-    const y = ring ? ring.y : 0;
-    return project({ x: c.x, y, z: c.z }, this.view, this.width, this.height);
+    const eye = this.cam.eye;
+    const midX = (a.pos.x + b.pos.x) * 0.5;
+    const midY = (a.pos.y + b.pos.y) * 0.5;
+    const midZ = (a.pos.z + b.pos.z) * 0.5;
+
+    // Turmachse auf gleicher Höhe
+    const axisX = this.scene && this.scene.center ? this.scene.center.x : 0;
+    const axisZ = this.scene && this.scene.center ? this.scene.center.z : 0;
+
+    const dMid = Math.hypot(midX - eye.x, midY - eye.y, midZ - eye.z);
+    const dAxis = Math.hypot(axisX - eye.x, midY - eye.y, axisZ - eye.z);
+    return dMid > dAxis;
   }
 
   /** Waehrend der Aufbauphase werden noch nicht erzeugte Ringe ausgeblendet. */
@@ -181,7 +217,7 @@ export class Renderer {
     const { e, pa, pb } = d;
     const dim = e.state === 'idle' && !e.usedInPath;
 
-    // Feste, duenne Linienbreite: jede Strecke bleibt als klare Linie erkennbar.
+    // Feste, dünne Linienbreite: jede Strecke bleibt als klare Linie erkennbar.
     const width = e.usedInPath ? 3.2 : (e.state === 'tree' ? 2.2 : 1.4);
 
     ctx.globalAlpha = behind ? 0.16 : (dim ? 0.5 : 1);
@@ -280,15 +316,15 @@ export class Renderer {
   /** Bodenraster für die Raumwirkung. */
   drawFloor() {
     const ctx = this.ctx;
-    const gridHalf = 3.2, step = 0.4;
-    ctx.strokeStyle = 'rgba(90, 110, 160, 0.16)';
+    const gridHalf = 3.6, step = 0.5;
+    ctx.strokeStyle = 'rgba(90, 110, 160, 0.2)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let i = -gridHalf; i <= gridHalf + 1e-6; i += step) {
-      const a = project({ x: i, y: 0, z: -gridHalf }, this.view, this.width, this.height);
-      const b = project({ x: i, y: 0, z: gridHalf }, this.view, this.width, this.height);
-      const c = project({ x: -gridHalf, y: 0, z: i }, this.view, this.width, this.height);
-      const d = project({ x: gridHalf, y: 0, z: i }, this.view, this.width, this.height);
+      const a = this.projectPoint({ x: i, y: 0, z: -gridHalf });
+      const b = this.projectPoint({ x: i, y: 0, z: gridHalf });
+      const c = this.projectPoint({ x: -gridHalf, y: 0, z: i });
+      const d = this.projectPoint({ x: gridHalf, y: 0, z: i });
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.moveTo(c.x, c.y);

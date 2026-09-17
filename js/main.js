@@ -51,16 +51,17 @@ const app = {
 function buildWorld(seed) {
   app.seed = seed;
   app.scene = buildScene(seed, {
-    // Deutlich unförmigere Polygone: viele Ecken, gebrochene Seiten und
-    // kräftige Auslenkung erzeugen echte Abzweigungen.
-    cornerCount: 11,
+    // Echte, konkave Polygone: viele Ecken mit Zacken und Einschnitten.
+    cornerCount: 12,
     cornerSegments: 3,
-    segmentDent: 0.34,
+    segmentDent: 0.38,
+    spikeChance: 0.35,
+    dentChance: 0.3,
     rings: Number(ui.density.value),
     // Deutlich höher als breit, damit sich die Ringe nicht überlagern.
     height: 5.0,
     radius: 1.5,
-    jitter: 0.2,
+    jitter: 0.3,
     ribEvery: 1,
   });
   app.graph = buildGraph(app.scene);
@@ -125,7 +126,7 @@ function updateStats() {
   ui.statDist.textContent = Number.isFinite(target.dist) ? target.dist.toFixed(3) : '-';
 
   const labels = {
-    growing: 'Schlauch waechst ...',
+    growing: 'Schlauch wächst ...',
     search: 'suche ...',
     searching: 'suche ...',
     tracing: 'Weg zurückverfolgen ...',
@@ -316,26 +317,52 @@ ui.showNodes.addEventListener('change', () => {
   app.renderer.showNodes = ui.showNodes.checked ? 'on' : 'off';
 });
 
-// Maus: drehen, zoomen, Tooltip.
-let dragging = false, lastX = 0, lastY = 0;
+// Maussteuerung:
+//   Ziehen             = Ansicht drehen
+//   Strg + Ziehen      = Ansicht verschieben (Pan)
+//   Umschalt + Ziehen  = Kamerahöhe ändern
+//   Rad                = zoomen
+//   Zeigen             = Tooltip am Knoten
+let dragging = false, lastX = 0, lastY = 0, dragMode = 'orbit';
+
 ui.canvas.addEventListener('pointerdown', (e) => {
   dragging = true;
   lastX = e.clientX;
   lastY = e.clientY;
+  // Strg gedrückt: verschieben statt drehen
+  dragMode = e.ctrlKey || e.metaKey ? 'pan' : (e.shiftKey ? 'height' : 'orbit');
   ui.canvas.setPointerCapture(e.pointerId);
+  ui.canvas.style.cursor = dragMode === 'pan' ? 'move' : 'grabbing';
 });
+
 ui.canvas.addEventListener('pointerup', (e) => {
   dragging = false;
   if (ui.canvas.hasPointerCapture(e.pointerId)) ui.canvas.releasePointerCapture(e.pointerId);
+  ui.canvas.style.cursor = 'grab';
 });
+
 ui.canvas.addEventListener('pointermove', (e) => {
   const rect = ui.canvas.getBoundingClientRect();
+
   if (dragging) {
-    app.renderer.rotateBy(e.clientX - lastX, e.clientY - lastY);
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
     lastX = e.clientX;
     lastY = e.clientY;
+
+    if (dragMode === 'pan') {
+      // Verschieben: funktioniert auch, wenn mittendrin Strg losgelassen wird
+      // oder zusätzlich gedrückt wird, deshalb prüfen wir die Taste live.
+      if (e.ctrlKey || e.metaKey) app.renderer.panBy(dx, dy);
+      else app.renderer.rotateBy(dx, dy);
+    } else if (dragMode === 'height' || e.shiftKey) {
+      app.renderer.rotateBy(dx * 0.4, dy);
+    } else {
+      app.renderer.rotateBy(dx, dy);
+    }
     return;
   }
+
   const hit = app.renderer.pickNode(e.clientX - rect.left, e.clientY - rect.top);
   if (hit) {
     const n = hit.node;
@@ -348,13 +375,23 @@ ui.canvas.addEventListener('pointermove', (e) => {
     ui.tooltip.style.display = 'none';
   }
 });
+
 ui.canvas.addEventListener('pointerleave', () => {
   ui.tooltip.style.display = 'none';
 });
+
 ui.canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   app.renderer.zoomBy(e.deltaY > 0 ? 1.08 : 0.92);
 }, { passive: false });
+
+// Strg gedrückt halten zeigt den Verschiebe-Cursor an.
+window.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && !app.running) ui.canvas.style.cursor = 'move';
+});
+window.addEventListener('keyup', (e) => {
+  if (!e.ctrlKey && !e.metaKey) ui.canvas.style.cursor = dragging ? 'grabbing' : 'grab';
+});
 
 window.addEventListener('resize', () => app.renderer.resize());
 window.addEventListener('keydown', (e) => {
@@ -365,6 +402,10 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyR') {
     ui.regenerate.click();
   }
+  // Null setzt die Ansicht auf den Startblick zurück.
+  if (e.code === 'Digit0' || e.code === 'Numpad0') {
+    app.renderer.resetView();
+  }
 });
 
 /* --------------------------------- Start --------------------------------- */
@@ -372,4 +413,6 @@ window.addEventListener('keydown', (e) => {
 buildWorld(Number(ui.seed.value) || app.seed);
 app.lastTime = performance.now();
 requestAnimationFrame(loop);
+// Animation sofort starten: erst wächst der Turm, dann sucht Dijkstra.
+setRunning(true);
 

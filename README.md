@@ -95,55 +95,74 @@ entstehen:
 
 | Größe | Wert |
 | --- | --- |
-| Ecken pro Ring | 11 |
+| Ecken pro Ring | 12 |
 | Teilstücke pro Seite | 3 |
-| Striche pro Ring | 33 |
+| Striche pro Ring | 36 |
 | Ringe | 3 bis 12 (Regler) |
 | Höhe gesamt | 5,0 |
-| Auslenkung der Zwischenpunkte | 0,34 |
-| Radius-Spannweite der Ecken | etwa 0,69 bis 3,26 |
+| Auslenkung der Zwischenpunkte | 0,38 |
+| Zacken- und Einschnitt-Wahrscheinlichkeit | 0,35 / 0,3 |
 
-Ergebnis bei 7 Ringen, gemessen mit `tools/check_shape.ps1`:
+Gemessen mit `tools/check_polygon_shape.ps1` über 5 Seeds:
 
 ```
-Knoten gesamt         : 231
-Striche gesamt        : 385   (231 Ringstriche + 154 Rippen)
-Knoten mit Abzweigung : 217 von 231   (Grad > 2)
-Knoten mit Grad 4     : 91
-Abweichung der Zwischenpunkte von der Geraden : 0,272
+Ecken pro Polygon     : 12
+Radien-Spanne         : 1,49 bis 3,60      (bei einem Kreis 0)
+Seiten-Spanne         : 0,93 bis 3,57      (beim Quadrat 0)
+Innenwinkel-Spanne    : bis 360 Grad       (beim regelmäßigen Vieleck 0)
+konkave Ecken         : 19 über 5 Polygone (Einbuchtungen, Winkel > 180 Grad)
 ```
 
-Drei Ursachen sorgen für die unförmige Silhouette (`buildBasePolygon` und
-`buildRing` in `js/generator.js`):
+Konkave Ecken sind der entscheidende Punkt: Sie entstehen nur, wenn eine Ecke
+nach innen springt. Genau das macht ein Vieleck unregelmäßig statt quaderförmig.
 
-1. **ungleiche Winkel** – jeder Eckenabstand schwankt um bis zu 35 Prozent,
+Vier Ursachen sorgen für diese Form (`buildBasePolygon` und `buildRing` in
+`js/generator.js`):
+
+1. **ungleiche Winkel** – jeder Eckenabstand schwankt um bis zu 45 Prozent,
 2. **stark schwankende Radien** – Ausbuchtungen und Einbuchtungen,
-3. **Zacken** – einzelne Ecken werden weit nach außen gezogen (Faktor bis 1,7)
-   oder nach innen gedrückt (Faktor bis 0,55), dazu ein harter Knickanteil pro
-   Ecke und Ringstufe.
+3. **Zacken und Einschnitte** – Ecken werden nach außen gezogen (Faktor bis 1,95)
+   oder nach innen gedrückt (Faktor bis 0,45),
+4. **seitliche Verschiebung** und **Höhenversatz** der Ringe – dadurch zeigen die
+   Striche in verschiedene Richtungen und sind unterschiedlich lang.
 
-Ohne diese Verformung liegen die Zwischenpunkte exakt auf der Geraden
-(Abweichung = 0) und das Polygon wirkt trotz vieler Punkte wie ein simples
-Vieleck. Geprüft mit `tools/check_selfintersect.ps1`: Die Winkelreihenfolge der
-Punkte bleibt über 25 Seeds stabil, es gibt also keine Selbstüberschneidung.
+Ohne diese Verformung liegen die Zwischenpunkte exakt auf der Geraden und das
+Polygon wirkt trotz vieler Punkte wie ein simples Vieleck. Geprüft mit
+`tools/check_selfintersect.ps1`: Die Winkelreihenfolge der Punkte bleibt über
+25 Seeds stabil, es gibt also keine Selbstüberschneidung.
 
-## Startansicht
+## Startansicht und Steuerung
 
-Der Blick startet immer **schräg von oben**. Die Kamera schwebt dafür real über
-der Szene (`cameraHeight`), zusätzlich kippt `pitch` die Ansicht:
+Die Kamera ist eine **echte 3D-Kamera** (`makeLookAtCamera` in
+`js/geometry.js`): Sie hat einen Standort im Raum und eine Blickrichtung, die
+aus Standort und Blickziel berechnet wird. Der Blick von oben ist damit eine
+Eigenschaft der Kameraposition und keine Einstellungssache.
 
-| Wert | Bedeutung |
+| Wert | Startwert | Bedeutung |
+| --- | --- | --- |
+| `orbit` | -0,55 | Drehung der Kamera um den Turm |
+| `eyeHeight` | 4,8 | Höhe der Kamera über der Grundfläche |
+| `distance` | 6,5 | waagerechter Abstand zur Mitte |
+| `targetHeight` | 1,6 | Höhe des Blickziels |
+
+Daraus ergibt sich ein Blickwinkel von **26,2 Grad unter der Waagerechten** und
+ein Blickvektor mit `y = -0,442` – die Kamera schaut also nach unten.
+Nachrechnen lässt sich das mit `tools/check_view.ps1`.
+
+### Bedienung mit der Maus
+
+| Eingabe | Wirkung |
 | --- | --- |
-| `yaw = -0,6` | Drehung um die Hochachse |
-| `pitch = 0,55` | Kippwinkel, positives Vorzeichen zeigt von oben |
-| `cameraHeight = 3,4` | Kamerahöhe über der Grundfläche |
-| `distance = 9,0` | Abstand zur Szenenmitte |
+| Ziehen | Kamera um den Turm drehen (waagerecht) und Höhe ändern (senkrecht) |
+| **Strg + Ziehen** | Ansicht verschieben (Pan) |
+| Umschalt + Ziehen | nur die Kamerahöhe ändern |
+| Mausrad | zoomen |
+| Zeigen auf Knoten | Tooltip mit Knoten-Id, Ring, Höhe und Distanz |
+| Taste `0` | Blick und Verschiebung zurücksetzen |
+| Knopf **Blick zurücksetzen** | dasselbe per Klick |
 
-Beide Werte sind nötig: Die Kamerahöhe allein verschiebt die Szene nur, ohne den
-Boden als Fläche zu zeigen. Geprüft mit `tools/check_view.ps1`; der gültige
-Bereich wurde mit `tools/find_view.ps1` systematisch abgesucht. Der Knopf
-**Blick zurücksetzen** stellt die Ansicht jederzeit wieder her, und jede neue
-Szene beginnt damit.
+Der Pan-Versatz wird direkt in Bildschirmkoordinaten geführt (`panX`, `panY`),
+funktioniert also unabhängig von Drehung und Zoom.
 
 ## Darstellung
 

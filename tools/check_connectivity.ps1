@@ -1,6 +1,6 @@
-ï»¿# Prueft bei der neuen Geometrie (6 Ecken, keine Zwischenpunkte), ob der
-# obere Ring Ã¼ber die Rippen zuverlaessig erreichbar bleibt.
-# Bei nur 6 Rippen pro Ringpaar ist eine LÃ¼cke kritischer als vorher.
+# Prueft bei der neuen Geometrie (6 Ecken, keine Zwischenpunkte), ob der
+# obere Ring über die Rippen zuverlaessig erreichbar bleibt.
+# Bei nur 6 Rippen pro Ringpaar ist eine Lücke kritischer als vorher.
 
 $ErrorActionPreference = 'Stop'
 
@@ -31,7 +31,7 @@ function Get-Noise($values, $t) {
   return $values[$i0] * (1 - $sm) + $values[$i1] * $sm
 }
 
-$cornerCount = 11
+$cornerCount = 12
 $cornerSegments = 3
 $rings = 7
 $perRing = $cornerCount * $cornerSegments
@@ -44,7 +44,7 @@ function Test-SeedEdges([int]$seed) {
   $nA = Set-Noise 16
   $nB = Set-Noise 24
 
-  # Grundpolygon-Ecken (nur fÃ¼r die Winkelverteilung; hier zaehlt die Topologie)
+  # Grundpolygon-Ecken (nur für die Winkelverteilung; hier zaehlt die Topologie)
   $corners = @()
   for ($i = 0; $i -lt $cornerCount; $i++) {
     $angle = ($i / $cornerCount) * 2 * [math]::PI + ((Get-Rand) - 0.5) * 0.24
@@ -53,7 +53,7 @@ function Test-SeedEdges([int]$seed) {
     $corners += [pscustomobject]@{ x = [math]::Cos($angle) * $rad; z = [math]::Sin($angle) * $rad }
   }
 
-  # Graph: pro Ring ein geschlossener Zug aus 6 Strichen, Rippen mit LÃ¼cken
+  # Graph: pro Ring ein geschlossener Zug aus 6 Strichen, Rippen mit Lücken
   $adj = @{}
   $nodeCount = $perRing * $rings
   for ($i = 0; $i -lt $nodeCount; $i++) { $adj[$i] = New-Object System.Collections.Generic.List[int] }
@@ -121,5 +121,5 @@ foreach ($s in 1..20) {
 }
 
 Write-Host ''
-if ($allOk) { Write-Host 'ERGEBNIS: oberer Ring bei allen Seeds vollstÃ¤ndig erreichbar' }
+if ($allOk) { Write-Host 'ERGEBNIS: oberer Ring bei allen Seeds vollständig erreichbar' }
 else { Write-Host 'ERGEBNIS: es gibt Seeds mit abgeschnittenem oberen Ring' }

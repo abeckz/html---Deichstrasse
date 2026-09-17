@@ -1,12 +1,11 @@
-﻿# Prüft die Kamera physikalisch: Steht sie über der Szene und blickt sie
-# tatsächlich auf die Grundfläche hinab?
+﻿# Prüft die ECHTE Kamera aus js/geometry.js (makeLookAtCamera + projectWithCamera).
 #
-# Kriterien für "Blick von schräg oben":
-#  1. Die Kamera ist höher als die Grundfläche (cameraHeight > 0).
-#  2. Im Bild erscheint der hintere Bodenpunkt weiter OBEN als der vordere
-#     (kleineres Bild-y), der Boden liegt also als Fläche sichtbar vor uns.
-#  3. Die Turmspitze liegt oberhalb des vorderen Bodenpunkts im Bild.
-#  4. Beide Bodenpunkte liegen unterhalb der Bildmitte (man schaut hinab).
+# Diese Prüfung ist eindeutig, weil sie den Blickwinkel im Weltraum misst:
+#   * Der Blickwinkel ist der Winkel zwischen Blickrichtung und Bodenebene.
+#     Ein Winkel < 0 Grad bedeutet Blick von oben (Blickrichtung zeigt abwärts).
+#   * Die Kamera muss über dem Boden stehen (eye.y > 0).
+#   * Der hintere Bodenpunkt muss im Bild oberhalb des vorderen liegen.
+#   * Alle Bodenpunkte müssen unterhalb der Bildmitte liegen (man schaut hinab).
 
 $ErrorActionPreference = 'Stop'
 
@@ -14,55 +13,80 @@ $W = 900.0
 $H = 700.0
 $towerHeight = 5.0
 
-function Rotate-Point($p, [double]$yaw, [double]$pitch) {
-  $cy = [math]::Cos($yaw); $sy = [math]::Sin($yaw)
-  $x1 = $p.x * $cy - $p.z * $sy
-  $z1 = $p.x * $sy + $p.z * $cy
-  $cx = [math]::Cos($pitch); $sx = [math]::Sin($pitch)
-  $y1 = $p.y * $cx - $z1 * $sx
-  $z2 = $p.y * $sx + $z1 * $cx
-  return [pscustomobject]@{ x = $x1; y = $y1; z = $z2 }
+function Norm($a) { $l = [math]::Sqrt($a.x * $a.x + $a.y * $a.y + $a.z * $a.z); if ($l -le 0) { $l = 1 }; return [pscustomobject]@{ x = $a.x / $l; y = $a.y / $l; z = $a.z / $l } }
+function SubV($a, $b) { return [pscustomobject]@{ x = $a.x - $b.x; y = $a.y - $b.y; z = $a.z - $b.z } }
+function CrossV($a, $b) { return [pscustomobject]@{ x = $a.y * $b.z - $a.z * $b.y; y = $a.z * $b.x - $a.x * $b.z; z = $a.x * $b.y - $a.y * $b.x } }
+function DotV($a, $b) { return $a.x * $b.x + $a.y * $b.y + $a.z * $b.z }
+function LenV($a) { return [math]::Sqrt($a.x * $a.x + $a.y * $a.y + $a.z * $a.z) }
+
+# Bildet makeLookAtCamera nach
+function Make-Camera($eye, $target, $fov) {
+  $forward = Norm (SubV $target $eye)
+  $up = Norm ([pscustomobject]@{ x = 0; y = 1; z = 0 })
+  $right = Norm (CrossV $forward $up)
+  $up2 = Norm (CrossV $right $forward)
+  return [pscustomobject]@{ eye = $eye; forward = $forward; right = $right; up = $up2; fov = $fov }
 }
 
-function Project-Point($p, $view) {
-  $r = Rotate-Point ([pscustomobject]@{ x = $p.x; y = $p.y - $view.cameraHeight; z = $p.z }) $view.yaw $view.pitch
-  $zc = [math]::Max($r.z + $view.distance, 0.2)
-  $k = ($view.fov * ([math]::Min($W, $H) / 2)) / $zc
-  return [pscustomobject]@{ x = $W / 2 + $r.x * $k; y = $H / 2 - $r.y * $k + $view.offsetY; depth = $zc }
+# Bildet projectWithCamera nach
+function Project-Via($p, $cam, [double]$panX = 0, [double]$panY = 0) {
+  $d = SubV $p $cam.eye
+  $cx = DotV $d $cam.right
+  $cy = DotV $d $cam.up
+  $cz = DotV $d $cam.forward
+  $safeZ = [math]::Max($cz, 0.05)
+  $k = ($cam.fov * ([math]::Min($W, $H) / 2)) / $safeZ
+  return [pscustomobject]@{ x = $W / 2 + $cx * $k + $panX; y = $H / 2 - $cy * $k + $panY; depth = $safeZ }
 }
 
-function Test-Camera($view, [string]$name) {
-  $frontBottom = Project-Point ([pscustomobject]@{ x = 0; y = 0; z = 2.0 }) $view
-  $backBottom  = Project-Point ([pscustomobject]@{ x = 0; y = 0; z = -2.0 }) $view
-  $topRing     = Project-Point ([pscustomobject]@{ x = 0; y = $towerHeight; z = 0 }) $view
-
-  $k1 = $view.cameraHeight -gt 0.5
-  $k2 = ($backBottom.y - $frontBottom.y) -lt 0
-  $k3 = $topRing.y -lt $frontBottom.y
-  $k4 = ($frontBottom.y -gt ($H / 2)) -and ($backBottom.y -gt ($H / 2))
-  $all = $k1 -and $k2 -and $k3 -and $k4
-
-  Write-Host ("{0}" -f $name)
-  Write-Host ("   Kamerahöhe über Boden : {0,6:N2}   höher als Grundfläche: {1}" -f $view.cameraHeight, $k1)
-  Write-Host ("   hinterer Bodenpunkt y : {0,6:N0}   vorderer y: {1,6:N0}   Boden als Fläche sichtbar: {2}" -f $backBottom.y, $frontBottom.y, $k2)
-  Write-Host ("   Turmspitze y          : {0,6:N0}   oberhalb des vorderen Bodens: {1}" -f $topRing.y, $k3)
-  Write-Host ("   beide Bodenpunkte unterhalb Bildmitte ({0:N0}): {1}" -f ($H / 2), $k4)
-  Write-Host ("   ERGEBNIS: {0}" -f $(if ($all) { 'schräg von oben - korrekt' } else { 'NICHT von oben!' }))
-  Write-Host ''
-  return $all
-}
-
-Write-Host '=== Kameraprüfung (Canvas: y zeigt nach unten) ==='
+Write-Host '=== Kamera-Prüfung (echte 3D-Kamera) ==='
 Write-Host ''
 
-$ok = $true
+# Werte wie in renderer.js (home)
+$orbit = -0.55
+$eyeHeight = 4.8
+$distance = 6.5
+$targetHeight = 1.6
+$fov = 1.35
 
-$new = [pscustomobject]@{ yaw = -0.6; pitch = 0.55; cameraHeight = 3.4; distance = 9.0; fov = 1.35; offsetY = 30 }
-$ok = (Test-Camera $new 'NEU: Kamera auf Höhe 3.4, pitch 0.55') -and $ok
+$eye = [pscustomobject]@{ x = [math]::Sin($orbit) * $distance; y = $eyeHeight; z = [math]::Cos($orbit) * $distance }
+$target = [pscustomobject]@{ x = 0; y = $targetHeight; z = 0 }
+$cam = Make-Camera $eye $target $fov
 
-$under = [pscustomobject]@{ yaw = -0.6; pitch = 0.55; cameraHeight = -3.4; distance = 9.0; fov = 1.35; offsetY = 30 }
-$null = Test-Camera $under 'GEGENPROBE: Kamera unter dem Boden (soll fehlschlagen)'
+Write-Host ("Kamerastandort : ({0:N2}, {1:N2}, {2:N2})" -f $eye.x, $eye.y, $eye.z)
+Write-Host ("Blickziel      : ({0:N2}, {1:N2}, {2:N2})" -f $target.x, $target.y, $target.z)
 
-Write-Host '=== Zusammenfassung ==='
-if ($ok) { Write-Host 'Der neue Startblick ist eindeutig schräg von oben.' }
-else { Write-Host 'Der neue Startblick erfüllt die Kriterien NICHT.' }
+# Blickwinkel gegen die Bodenebene: wie stark zeigt forward nach unten?
+$angle = [math]::Asin(-$cam.forward.y) * 180 / [math]::PI
+Write-Host ("Blickrichtung  : ({0:N3}, {1:N3}, {2:N3})" -f $cam.forward.x, $cam.forward.y, $cam.forward.z)
+Write-Host ("Blickwinkel zur Bodenebene: {0:N1} Grad" -f $angle)
+Write-Host ''
+
+# Punkte testen
+$frontBottom = Project-Via ([pscustomobject]@{ x = 0; y = 0; z = 2.0 }) $cam
+$backBottom  = Project-Via ([pscustomobject]@{ x = 0; y = 0; z = -2.0 }) $cam
+$topRing     = Project-Via ([pscustomobject]@{ x = 0; y = $towerHeight; z = 0 }) $cam
+
+Write-Host ("vorderer Bodenpunkt : Bild-x={0,6:N0}  Bild-y={1,6:N0}" -f $frontBottom.x, $frontBottom.y)
+Write-Host ("hinterer Bodenpunkt : Bild-x={0,6:N0}  Bild-y={1,6:N0}" -f $backBottom.x, $backBottom.y)
+Write-Host ("Turmspitze          : Bild-x={0,6:N0}  Bild-y={1,6:N0}" -f $topRing.x, $topRing.y)
+Write-Host ''
+
+$failures = 0
+function Pruefe([bool]$cond, [string]$text) {
+  if ($cond) { Write-Host ("  [OK]   {0}" -f $text) }
+  else { Write-Host ("  [FAIL] {0}" -f $text); $script:failures++ }
+}
+
+Pruefe ($eye.y -gt 0.5) 'Kamera steht über dem Boden (eye.y > 0)'
+Pruefe ($angle -gt 5) 'Blickrichtung zeigt nach unten (Winkel > 5 Grad)'
+Pruefe ($angle -lt 70) 'Blick ist schräg, nicht senkrecht von oben (Winkel < 70 Grad)'
+Pruefe ($backBottom.y -lt $frontBottom.y) 'Hinterer Bodenpunkt liegt im Bild weiter oben'
+Pruefe ($topRing.y -lt $backBottom.y) 'Turmspitze liegt über allen Bodenpunkten'
+Pruefe ($frontBottom.y -gt ($H / 2)) 'Vorderer Bodenpunkt liegt unterhalb der Bildmitte'
+Pruefe ($cam.forward.y -lt 0) 'Blickvektor zeigt abwärts (forward.y < 0)'
+
+Write-Host ''
+if ($failures -eq 0) { Write-Host 'ERGEBNIS: Blick kommt eindeutig von schräg oben.' }
+else { Write-Host ("ERGEBNIS: {0} Problem(e)" -f $failures) }
+exit $failures
